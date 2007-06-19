@@ -1,0 +1,45 @@
+# $Id: make.rules,v 1.3 2007/05/07 13:46:22 derek Exp $
+
+ifndef HOSTNAME
+HOSTNAME := $(shell hostname)
+endif
+
+include ../$(HOSTNAME).config
+OS=$(shell ../getos.sh)
+ARCH=$(shell ../getarch.sh)
+
+PLATFORM=$(OS).$(ARCH)
+
+APR_LDIR=$(shell $(APR_BIN) --link-ld --libs)
+APRUI_LDIR=$(shell $(APRUI_BIN) --link-ld --libs)
+LDIR=-L../../$(PLATFORM)/lib  -lm $(if $(ALTLOCAL),-L$(ALTLOCAL)/lib) $(APR_LDIR)  
+VPATH=../../$(PLATFORM)/lib:../../$(PLATFORM)/bin:../../$(PLATFORM)/bin/tools:../../$(PLATFORM)/obj:.
+
+BINDIR=../../$(PLATFORM)/bin
+OBJDIR=../../$(PLATFORM)/obj
+LIBDIR=../../$(PLATFORM)/lib
+SRCDIR=../../$(PLATFORM)/gen-src
+
+#LINUX SPECIFIC
+ifeq ("$(OS).$(ARCH)", "linux.x86")
+endif
+
+CC=gcc
+LD=gcc
+AR=ar
+
+APR_CFLAGS=$(shell $(APR_BIN) --cppflags)
+CFLAGS= $(PLATFORM_CFLAGS) -D_REENTRANT -g -O3 -Wall  $(APR_CFLAGS) 
+
+APR_INC=$(shell $(APR_BIN) --includes)
+INC=-I../include  $(if $(ALTLOCAL),-I$(ALTLOCAL)/include) $(APR_INC)
+
+OBJS=$(foreach n, $(basename $(SRC)), $(OBJDIR)/$(n).o)
+
+$(OBJDIR)/%.o: %.c
+	@-mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(INC)  -c $< -o $@
+
+../%.config : 
+	../getenv.sh $@
+

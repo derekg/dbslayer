@@ -1,0 +1,30 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+	"http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+<head>
+	<title>Slayer Query Tests</title>
+	<script type="text/javascript" src="prototype.js"></script>
+</head>
+<body>
+	
+<script type="text/javascript">
+function post_query() {
+	qnode = $F('query');
+	query = $H();
+	query["SQL"] = qnode;
+	
+	url = "/db?" + escape(query.toJSON());
+	new Ajax.Updater("results", url, {'method': 'get'}); 
+}
+</script>
+
+	<h1>Live Slayer Search</h1>
+	<form action="/db" method="get" accept-charset="utf-8">
+		<textarea name="query" id="query" rows="8" cols="40"></textarea>
+		<p><a href="javascript:post_query()">Submit</a></p>
+	</form>
+	
+	<hr/>
+	<div id="results"></div>
+</body>

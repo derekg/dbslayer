@@ -1,0 +1,154 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+	"http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+<head>
+	<title>Plotkit test</title>
+	<script type="text/javascript" src="prototype.js"></script>
+	<script type="text/javascript" src="excanvas.js"></script>
+	<script type="text/javascript" src="plotr/Plotr.js"></script>
+	<script type="text/javascript" src="scriptaculous/scriptaculous.js"></script>
+	<style type="text/css">
+	div#chart { margin-left: 310px;  }
+	div#data { float: left; margin: 10px; }
+	</style>
+</head>
+<body>
+  <div id="data"></div>
+	<div id="chart"><canvas id="bar" height="800" width="300"></canvas></div>
+
+	<script type="text/javascript">
+	var plot = null;
+	
+	function formatTime(date) {
+		minutes = date.getMinutes() + "";
+		if (minutes.length == 1) {
+		 	minutes = "0" + minutes;
+		}
+		
+		hours = date.getHours() + "";
+		if (hours.length == 1) {
+			hours = "0" + hours;
+		}
+		
+		return hours+':'+minutes;
+	}
+	
+	function formatDate(date) {
+		month = date.getMonth() + 1;
+
+		minutes = date.getMinutes() + "";
+		if (minutes.length == 1) {
+		 	minutes = "0" + minutes;
+		}
+		
+		hours = date.getHours() + "";
+		if (hours.length == 1) {
+			hours = "0" + hours;
+		}
+		
+		year = date.getYear() + 1900;
+		
+		return month+"/"+date.getDate()+"/"+year+' '+hours+':'+minutes;
+	}
+	
+	function init_plot() {
+		var chartdata = $A();
+		var chartlabels = $A();
+
+		var plot_options = {
+			strokewidth: 2,
+			sweetRender: true,
+			barOrientation: 'horizontal',
+			backgroundColor: '#FFFFFF',
+			colorScheme: 'blue'
+		};
+		
+		var dataset1 = {
+			'dataset': chartdata
+		};
+
+		plot = new Plotr.BarChart('bar', plot_options);
+		plot.addDataset(dataset1);
+	}
+	
+	function plot_stats(stats) {
+		var chartdata = $A();
+		var max = stats["slices"].last;
+		
+		for(i = 0; i < stats["slices"].length - 1; i++) {
+			//document.write("<b>"+i+"</b>: "+data[5]+"<br/>");
+			chartdata[i] = new Array(i, stats["hits"][i]);
+
+			var theDate = new Date(stats["slices"][i] * 1000);
+			//chartlabels[i] = {v: stats["slices"].length - i, label: formatTime(theDate)};
+		}
+
+		var plot_options = {
+			strokewidth: 2,
+			sweetRender: true,
+			barOrientation: 'horizontal',
+			backgroundColor: '#FFFFFF',
+			colorScheme: 'blue',
+			// xTicks: chartlabels
+		};
+		
+		var dataset1 = {
+			'dataset': chartdata
+		};
+
+		plot.reset();
+		plot.addDataset(dataset1);
+		plot.render('bar', plot_options);
+	}
+
+	function data_table(stats) {
+		var mybody = $('data');
+		
+		while (mybody.hasChildNodes()) {
+		  mybody.removeChild(mybody.childNodes[0]);
+		}
+		
+		var num_headers = 2;
+		var table_headers = new Array('Date', 'Hits');
+		var bar = [Builder.node('th', 'Date'), Builder.node('th', 'Hits')];
+		var foo = table_headers.map(function(name) { return Builder.node("th", name) } );
+		var data_hash = $H();
+		for (i = stats["slices"].length - 1; i >= 0; i--) {
+			var theDate = new Date(stats["slices"][i] * 1000);
+			data_hash[formatDate(theDate)] = stats["hits"][i];
+		}
+		
+	  table = Builder.node('table', {cellspacing: 2, cellpadding: 2}, [
+	    Builder.node('thead', [
+				Builder.node('tr', table_headers.map(function(name) { return Builder.node('th', name)}))]),
+		  Builder.node('tbody', 
+				data_hash.map(function(date) {
+					return Builder.node('tr', [
+						Builder.node('td', date.key),
+						Builder.node('td', date.value ? date.value : '0')
+					])
+				})
+			)]
+		)
+	
+		mybody.appendChild(table);
+	}
+</script>
+
+
+<script type="text/javascript">
+function update_stats(stext) {
+	var stats = eval("(" + stext + ")");
+	plot_stats(stats);
+	data_table(stats);	
+}
+
+init_plot();
+new Ajax.PeriodicalUpdater('', '/stats', {'method': 'GET', 'frequency': 60, 'onSuccess': function(resp) { update_stats(resp.responseText)}}) 
+
+//stats = {"current_time" : 1178115030,"slices" : [1178114567 , 1178114627 , 1178114687 , 1178114747 , 1178114807 , 1178114867 , 1178114927],"hits" : [5 , 2 , 2 , 0 , 0 , 0 , 0],"start_time" : 1178114567,"total_requests" : 9};
+
+</script>
+</body>
+</html>

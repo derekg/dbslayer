@@ -1,0 +1,5 @@
+Some experimental scripts for AJAX views of Slayer data. Ugly as sin for now, but you can clean them up.
+
+To use, copy to /web/siteadm/dbslayer/htdocs (be sure to include subdirs in some cases). And launch dbslayer with -b /web/siteadm/dbslayer/htdocs
+
+
