@@ -10,8 +10,8 @@ AC_CONFIG_SRCDIR([server/dbslayer.c])
 #AC_CONFIG_HEADER([config.h])
 
 dnl apache run time apr is required
-AC_ARG_WITH(apr1-config, 
-[  --with-apr1-config=PATH The path to apr-1-config if not in $PATH], [
+AC_ARG_WITH(apr-1-config, 
+[  --with-apr-1-config=PATH   The path to apr-1-config if not in $PATH], [
   APRCONFIG=$withval
 ], [
   APRCONFIG=apr-1-config-was-not-found-by-configure
@@ -44,8 +44,8 @@ AC_MSG_CHECKING(for APR libraries)
 AC_MSG_RESULT($APR_LIBS)
 
 dnl apache run time apr utility is required
-AC_ARG_WITH(apu1-config, 
-[  --with-apu1-config=PATH The path to apu-1-config if not in $PATH], [
+AC_ARG_WITH(apu-1-config, 
+[  --with-apu-1-config=PATH   The path to apu-1-config if not in $PATH], [
   APUCONFIG=$withval
 ], [
   APUCONFIG=apu-1-config-was-not-found-by-configure
@@ -73,7 +73,7 @@ AC_MSG_RESULT($APU_LIBS)
 
 dnl apache run time apr is required
 AC_ARG_WITH(mysql-config, 
-[  --with-mysql-config=PTH The path to mysql-config if not in $PATH], [
+[  --with-mysql-config=PATH   The path to mysql-config if not in $PATH], [
   MYSQLCONFIG=$withval
 ], [
   MYSQLCONFIG=mysql-config-was-not-found-by-configure
