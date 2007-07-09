@@ -25,6 +25,8 @@
 DROP TABLE IF EXISTS `TypeTest`;
 CREATE TABLE `TypeTest` (
 	`id` int(11) NOT NULL auto_increment,
+	`row` char(6) NOT NULL,
+	`bit` bit(2) NULL,
 	`tinyint` tinyint NULL,
 	`smallint` smallint NULL,
 	`mediumint` mediumint NULL,
@@ -36,8 +38,8 @@ CREATE TABLE `TypeTest` (
 	`tinytext` tinytext NULL,
 	`blob` blob NULL,
 	`text` text NULL,
-	`charstr` char(32) NULL,
-	`varcharstr` varchar(32) NULL,
+	`char` char(32) NULL,
+	`varchar` varchar(32) NULL,
 	`mediumblob` mediumblob NULL,
 	`longblob` longblob NULL,
 	`longtext` longtext NULL,
@@ -51,8 +53,8 @@ CREATE TABLE `TypeTest` (
 	PRIMARY KEY (`id`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
-INSERT INTO `TypeTest` VALUES (1, 2, 9, 257, 32768, 2147483648, 400.85, 500.99, 3.14159, 'x', 'blob', 'text', 'char', 'varchar', 'mediumblob', 'longblob', 'longtext', '2001-10-11', '12:30:00', '2001-10-11 12:30:00', '2001-10-11 12:30:00', 2001, 'apple', 3);
-INSERT INTO `TypeTest` VALUES (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL); 
+INSERT INTO `TypeTest` VALUES (1, 'data', b'10', 2, 9, 257, 32768, 2147483648, 400.85, 500.99, 3.14159, 'x', 'blob', 'text', 'char', 'varchar', 'mediumblob', 'longblob', 'longtext', '2001-10-11', '12:30:00', '2001-10-11 12:30:00', '2001-10-11 12:30:00', 2001, 'apple', 3);
+INSERT INTO `TypeTest` VALUES (2, 'null', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL); 
 
 DROP TABLE IF EXISTS `City`;
 CREATE TABLE `City` (
