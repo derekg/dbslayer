@@ -21,9 +21,9 @@
 #include "dbslayer_logging.h"
 #include "dbslayer_stats.h"
 
-/* $Id: dbslayer.c,v 1.22 2007/06/08 23:26:49 derek Exp $ */
+/* $Id: dbslayer.c,v 1.26 2007/07/10 17:55:16 derek Exp $ */
 
-#define SLAYER_SERVER "Server: dbslayer/server beta-9\r\n"
+#define SLAYER_SERVER "Server: dbslayer/server beta-10\r\n"
 
 typedef struct  _thread_shared_data_t { 
 	char *user;
@@ -324,6 +324,8 @@ int main(int argc, char **argv) {
 	int socket_timeout =  10 * 1000* 1000;
 	int nslice = 60 * 24;
 	int tslice = 60 ;
+	char ebuf[1024];
+	char *reldir = NULL;
 	
 
 
@@ -343,20 +345,25 @@ int main(int argc, char **argv) {
 			case 'x': pass= optarg; break;
 			case 'n': nslice = (atoi(optarg) == 0 ? 60*24 : atoi(optarg)) ; break;
 			case 'i': tslice = (atoi(optarg) == 0 ? 60 : atoi(optarg)) ; break;
-			case 'v': printf("%s",SLAYER_SERVER); return 0;
+			case 'v': fprintf(stdout,"%s",SLAYER_SERVER); return 0;
 			default:
 				break;
 		}
 	}
 
+	if( server == NULL || config == NULL || thread_count == 0 || port == 0) { 
+		fprintf(stdout,"Usage %s:  -s server[:server]* -c config \n\t[-u username -x password -t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [ defaults to 60 seconds] ] -v [prints version and exits]\n",basename(argv[0]));
+		return 0;
+	}
+
 	status = apr_initialize();
 	status = apr_pool_create(&mpool,NULL);
 	mysql_library_init(0,NULL,NULL);	
-	
-	if( server == NULL || config == NULL || thread_count == 0 || port == 0) { 
-		printf("Usage %s:  -s server[:server]* -c config \n\t[-u username -x password -t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [ defaults to 60 seconds] ] -v [prints version and exits]\n",basename(argv[0]));
-		return 0;
-	}
+	reldir = getcwd(NULL,0);
+
+	if(config[0] !='/') { config = apr_pstrcat(mpool,reldir,"/",config,NULL); }
+	if(logfile[0] !='/') { logfile = apr_pstrcat(mpool,reldir,"/",logfile,NULL); }
+	if(elogfile[0] !='/') { elogfile = apr_pstrcat(mpool,reldir,"/",elogfile,NULL); }
 
 	if(debug == NULL) { apr_proc_detach(APR_PROC_DETACH_DAEMONIZE); }
 	chdir("/tmp"); // so I can dump core someplace that I am likely to have write access to 
@@ -444,13 +451,21 @@ int main(int argc, char **argv) {
   	do {
       status = apr_pollset_poll(pollset, 1000*1000 /* .5 sec */ , &events, &ret_pfd);
       if(apr_atomic_read32(&td_shared.shutdown)) goto shutdown;
-    }while(status != APR_SUCCESS);
-		status = apr_socket_accept(&(qd->conn),conn,qd->mpool);
-		status = apr_socket_timeout_set(qd->conn,socket_timeout);
-		qd->begin_request = apr_time_now();
-		while((status == apr_queue_push(out_queue,qd)) == APR_EINTR);
-		if(status == APR_EOF) goto shutdown;
-		serviced++;	
+    }while(status == APR_TIMEUP);
+		if(status == APR_SUCCESS) { 
+			status = apr_socket_accept(&(qd->conn),conn,qd->mpool);
+			status = apr_socket_timeout_set(qd->conn,socket_timeout);
+			qd->begin_request = apr_time_now();
+			while((status == apr_queue_push(out_queue,qd)) == APR_EINTR);
+			if(status == APR_EOF) goto shutdown;
+			serviced++;	
+		} else { 
+			//dlh
+			fprintf(stderr,"ERROR in apr_pollset_poll - %s\n",apr_strerror(status,ebuf,sizeof(ebuf)));
+			dbslayer_log_message(td_shared.elmanager,"ERROR in apr_pollset_poll - ");
+			dbslayer_log_message(td_shared.elmanager,apr_strerror(status,ebuf,sizeof(ebuf)));
+			dbslayer_log_message(td_shared.elmanager,"\n");
+		}
 	} 
 
 shutdown:
@@ -461,8 +476,8 @@ shutdown:
 	dbslayer_log_close(td_shared.lmanager);
 	dbslayer_log_close(td_shared.elmanager);
 	mysql_library_end();	
-	printf("Serviced %d requests\n",serviced);
 	apr_pool_destroy(mpool);
 	apr_terminate();
+	free(reldir);
 	return 0;
 }
