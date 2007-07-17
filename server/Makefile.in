@@ -157,7 +157,7 @@ sysconfdir = @sysconfdir@
 target_alias = @target_alias@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-dbslayer_LDADD = -L@top_srcdir@/common -lsimplejson -L@top_srcdir@/db -ldbaccess $(APR_LIBS) $(APU_LIBS) $(MYSQL_LIBS) 
+dbslayer_LDADD = -L@top_srcdir@/common -lsimplejson -L@top_srcdir@/db -ldbaccess $(APU_LIBS) $(APR_LIBS)  $(MYSQL_LIBS) 
 AM_CFLAGS = $(MYSQL_CFLAGS) $(APR_CFLAGS) $(APU_CFLAGS) -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
 dbslayer_SOURCES = dbslayer.c dbslayer_logging.c dbslayer_stats.c
 all: all-am
@@ -173,9 +173,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign  server/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --gnu  server/Makefile'; \
 	cd $(top_srcdir) && \
-	  $(AUTOMAKE) --foreign  server/Makefile
+	  $(AUTOMAKE) --gnu  server/Makefile
 .PRECIOUS: Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
