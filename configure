@@ -2457,7 +2457,7 @@ fi
 fi
 
 
-if test "x$MYSQLKCONFIG" = "xmysql_config-was-not-found-by-configure"; then
+if test "x$MYSQLCONFIG" = "xmysql_config-was-not-found-by-configure"; then
   { { echo "$as_me:$LINENO: error: mysql_config wasn't found please install http://www.mysql.com " >&5
 echo "$as_me: error: mysql_config wasn't found please install http://www.mysql.com " >&2;}
    { (exit 1); exit 1; }; }
