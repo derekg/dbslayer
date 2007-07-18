@@ -362,8 +362,8 @@ int main(int argc, char **argv) {
 	reldir = getcwd(NULL,0);
 
 	if(config[0] !='/') { config = apr_pstrcat(mpool,reldir,"/",config,NULL); }
-	if(logfile[0] !='/') { logfile = apr_pstrcat(mpool,reldir,"/",logfile,NULL); }
-	if(elogfile[0] !='/') { elogfile = apr_pstrcat(mpool,reldir,"/",elogfile,NULL); }
+	if(logfile != NULL && logfile[0] !='/') { logfile = apr_pstrcat(mpool,reldir,"/",logfile,NULL); }
+	if(elogfile != NULL && elogfile[0] !='/') { elogfile = apr_pstrcat(mpool,reldir,"/",elogfile,NULL); }
 
 	if(debug == NULL) { apr_proc_detach(APR_PROC_DETACH_DAEMONIZE); }
 	chdir("/tmp"); // so I can dump core someplace that I am likely to have write access to 
