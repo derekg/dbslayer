@@ -151,10 +151,17 @@ int handle_other(thread_shared_data_t *td, queue_data_t *qd,  char *equery,const
 			//SEND FILE
   		sent = 0;
 			do { 
+#ifdef APR_HAS_SENDFILE		
 				outlen = outfile_stat.size - sent;
 				off = sent;
+
 				apr_socket_sendfile(qd->conn,outfile,NULL,&off,&outlen,0);
 				sent += outlen;
+#else
+				dbslayer_log_err_message(td->elmanager,qd->mpool,qd->conn,http_request,"Sendfile not supported on this system, can't sent file");
+#endif
+				
+
   		} while(status != APR_TIMEUP && outlen!=0 && sent < outfile_stat.size);
 			if((outlen == 0 && sent < outfile_stat.size) || status == APR_TIMEUP) { 
 				dbslayer_log_err_message(td->elmanager,qd->mpool,qd->conn,http_request,"Connection timed out");
