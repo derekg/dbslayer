@@ -151,14 +151,14 @@ int handle_other(thread_shared_data_t *td, queue_data_t *qd,  char *equery,const
 			//SEND FILE
   		sent = 0;
 			do { 
-#ifdef APR_HAS_SENDFILE		
+#ifndef DARWIN
 				outlen = outfile_stat.size - sent;
 				off = sent;
 
 				apr_socket_sendfile(qd->conn,outfile,NULL,&off,&outlen,0);
 				sent += outlen;
 #else
-				dbslayer_log_err_message(td->elmanager,qd->mpool,qd->conn,http_request,"Sendfile not supported on this system, can't sent file");
+				dbslayer_log_err_message(td->elmanager,qd->mpool,qd->conn,http_request,"Sendfile not supported on osx/darwin, dang.");
 #endif
 				
 
