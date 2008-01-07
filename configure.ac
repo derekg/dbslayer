@@ -1,6 +1,6 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
-AC_PREREQ(2.61)
+AC_PREREQ(2.60)
 AC_INIT(dbslayer, 1.0)
 
 AM_INIT_AUTOMAKE(dbslayer, 1.0)
@@ -42,6 +42,7 @@ AC_MSG_CHECKING(for APR includes)
 AC_MSG_RESULT($APR_INCLUDES)
 AC_MSG_CHECKING(for APR libraries)
 AC_MSG_RESULT($APR_LIBS)
+
 
 dnl apache run time apr utility is required
 AC_ARG_WITH(apu-1-config, 
@@ -96,12 +97,39 @@ AC_SUBST(MYSQL_CFLAGS)
 AC_SUBST(MYSQL_INCLUDES)
 AC_SUBST(MYSQL_LIBS)
 
+
+
 AC_MSG_CHECKING(for MySQL CFLAGS)
 AC_MSG_RESULT($MYSQL_CFLAGS)
 AC_MSG_CHECKING(for MySQL includes)
 AC_MSG_RESULT($MYSQL_INCLUDES)
 AC_MSG_CHECKING(for MySQL libraries)
 AC_MSG_RESULT($MYSQL_LIBS)
+#apr_memcache support
+AC_CHECK_LIB(apr_memcache, apr_memcache_create, [APR_MEMCACHE_LIBS='-lapr_memcache'])
+AC_CHECK_LIB(apr_memcache, apr_memcache_create, [AC_DEFINE(HAVE_APR_MEMCACHE_H, 1)])
+AC_SUBST(APR_MEMCACHE_LIBS)
+#AC_CHECK_HEADERS([apr_memcache])
+AC_MSG_CHECKING(for apr_memcache)
+AC_MSG_RESULT($APR_MEMCACHE_LIBS)
+#LUA support
+AC_CHECK_LIB(lua, lua_newstate, [LUA_LIBS='-llua '])
+AC_MSG_RESULT($LUA_LIBS)
+AC_CHECK_HEADERS([lua.h  lualib.h])
+AC_CHECK_LIB(lua5.1, lua_newstate, [LUA_LIBS='-llua5.1 -llua5.1-filesystem'])
+AC_CHECK_HEADERS([lua5.1/lua.h lua5.1/lualib.h])
+AC_MSG_RESULT($LUA_INCLUDES_FOUND)
+AC_SUBST(LUA_LIBS)
+LUA_INCLUDES="-I lua"
+for file in lua/*.lua; do 
+    destfile=`basename $file .lua`_parser_lua.h
+    define=`basename $destfile .h`
+    define=`echo "${define}"`
+    echo "char * ${define}() {" > server/$destfile
+    cat $file | sed -e 's/\\/\\\\/g' | sed -e 's/"/\\"/g' | tr -d '\015' |  tr -d '\177-\255' | sed -e 's/$/\\n/' | tr -d '\012' | sed -e "s/^/    return(\""/ | sed -e 's/$/");}/g'>> server/$destfile;
+    echo "" >> server/$destfile;  
+    AC_MSG_RESULT(generating $destfile from $file)
+done
 
 # Checks for programs.
 AC_PROG_CC

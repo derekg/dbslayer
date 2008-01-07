@@ -92,13 +92,13 @@ void dbslayer_log_add_entry(dbslayer_log_manager_t *manager, apr_pool_t *mpool,
 			const char *request_line,int response_code, 
 			int nbytes_sent, apr_int64_t time_toservice ) { 
 
-	json_value *container = json_object_create(mpool);
-	json_object_add(container,"client_ip",json_string_create(mpool,client_ip));
-	json_object_add(container,"request_time",json_long_create(mpool,rtime / (1000*1000)));
-	json_object_add(container,"request",json_string_create(mpool,request_line));
-	json_object_add(container,"response_code",json_long_create(mpool,response_code));
-	json_object_add(container,"bytes_sent",json_long_create(mpool,nbytes_sent));
-	json_object_add(container,"time_toservice",json_long_create(mpool,time_toservice));
+	json_value *container = json_create_object(mpool);
+	json_add_object(container,"client_ip",json_create_string(mpool,client_ip));
+	json_add_object(container,"request_time",json_create_long(mpool,rtime / (1000*1000)));
+	json_add_object(container,"request",json_create_string(mpool,request_line));
+	json_add_object(container,"response_code",json_create_long(mpool,response_code));
+	json_add_object(container,"bytes_sent",json_create_long(mpool,nbytes_sent));
+	json_add_object(container,"time_toservice",json_create_long(mpool,time_toservice));
 	char *json_entry = strdup(json_serialize(mpool,container)); //we want our own copy of this data
 
 	//smallest chunk in the mutex
@@ -114,11 +114,11 @@ void dbslayer_log_add_error(dbslayer_log_manager_t *manager, apr_pool_t *mpool,
 			const char *client_ip,apr_int64_t rtime,
 			const char *request_line, const char *error_msg ) { 
 
-	json_value *container = json_object_create(mpool);
-	json_object_add(container,"client_ip",json_string_create(mpool,client_ip));
-	json_object_add(container,"request_time",json_long_create(mpool,rtime / (1000*1000)));
-	json_object_add(container,"request",json_string_create(mpool,request_line));
-	json_object_add(container,"error",json_string_create(mpool,error_msg));
+	json_value *container = json_create_object(mpool);
+	json_add_object(container,"client_ip",json_create_string(mpool,client_ip));
+	json_add_object(container,"request_time",json_create_long(mpool,rtime / (1000*1000)));
+	json_add_object(container,"request",json_create_string(mpool,request_line));
+	json_add_object(container,"error",json_create_string(mpool,error_msg));
 	char *json_entry = strdup(json_serialize(mpool,container)); //we want our own copy of this data
 	//smallest chunk in the mutex
 	apr_thread_mutex_lock(manager->list_mutex);

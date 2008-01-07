@@ -5,12 +5,13 @@ int main(int argc, char **argv) {
 	apr_pool_t *mpool;
 	apr_pool_initialize();
 	apr_pool_create(&mpool,NULL);
-	db_handle_t *handle = db_handle_init(argv[1]/*user*/,argv[2]/*pass*/,argv[3]/*server*/,argv[4]/*config*/,&argc);
-	json_value *query= decode_json(argv[5],mpool);
-	if(query) { 
+	db_handle_t *handle = db_handle_init(argv[1]/*user*/, argv[2]/*pass*/,
+			argv[3]/*server*/, argv[4]/*config*/, &argc);
+	json_value *query= decode_json(argv[5], mpool);
+	if (query) {
 		encode_json(query);
 		printf("\n");
-		json_value *result = dbexecute(handle,query,mpool);
+		json_value *result = db_execute(handle, query, mpool);
 		encode_json(result);
 		printf("\n");
 	}

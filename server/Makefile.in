@@ -47,6 +47,7 @@ am_dbslayer_OBJECTS = dbslayer.$(OBJEXT) dbslayer_logging.$(OBJEXT) \
 dbslayer_OBJECTS = $(am_dbslayer_OBJECTS)
 am__DEPENDENCIES_1 =
 dbslayer_DEPENDENCIES = $(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
+	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
 	$(am__DEPENDENCIES_1)
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
@@ -66,6 +67,7 @@ APRCONFIG = @APRCONFIG@
 APR_CFLAGS = @APR_CFLAGS@
 APR_INCLUDES = @APR_INCLUDES@
 APR_LIBS = @APR_LIBS@
+APR_MEMCACHE_LIBS = @APR_MEMCACHE_LIBS@
 APUCONFIG = @APUCONFIG@
 APU_INCLUDES = @APU_INCLUDES@
 APU_LIBS = @APU_LIBS@
@@ -96,6 +98,7 @@ LDFLAGS = @LDFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LTLIBOBJS = @LTLIBOBJS@
+LUA_LIBS = @LUA_LIBS@
 MAKEINFO = @MAKEINFO@
 MKDIR_P = @MKDIR_P@
 MYSQLCONFIG = @MYSQLCONFIG@
@@ -157,8 +160,8 @@ sysconfdir = @sysconfdir@
 target_alias = @target_alias@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-dbslayer_LDADD = -L@top_srcdir@/common -lsimplejson -L@top_srcdir@/db -ldbaccess $(APU_LIBS) $(APR_LIBS)  $(MYSQL_LIBS) 
-AM_CFLAGS = $(MYSQL_CFLAGS) $(APR_CFLAGS) $(APU_CFLAGS) -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
+dbslayer_LDADD = -L@top_srcdir@/common -lsimplejson -L@top_srcdir@/db -ldbaccess $(APU_LIBS) $(APR_LIBS)  $(MYSQL_LIBS) $(LUA_LIBS) $(APR_MEMCACHE_LIBS)
+AM_CFLAGS = $(MYSQL_CFLAGS) $(APR_CFLAGS) $(APU_CFLAGS) -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES) $(LUA_INCLUDES)
 dbslayer_SOURCES = dbslayer.c dbslayer_logging.c dbslayer_stats.c
 all: all-am
 
