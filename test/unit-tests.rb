@@ -375,7 +375,6 @@ class TestDBSlayerTypes < Test::Unit::TestCase
      exec_query( sql, "CACHE" => 1, "CACHE_TTL" => 3000000 ) do |f|
        output = f.read
        r=JSON.parse(output)
-       puts r["CACHED"]
        assert r["CACHED"]
      end
      exec_query( sql ) do |f|
