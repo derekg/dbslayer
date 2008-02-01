@@ -222,10 +222,10 @@ apr_status_t cache_set(thread_shared_data_t *td, queue_data_t *qd,
 #endif
 apr_status_t cache_result(thread_shared_data_t *td, queue_data_t *qd,
 		json_value *query, json_value *result, const char *http_request) {
+	apr_status_t rv= APR_ENOTIMPL;	
 #ifdef HAVE_APR_MEMCACHE_H
 	long cache_ttl;
 	json_value *sql;
-	apr_status_t rv= APR_ENOTIMPL;
 	apr_short_interval_time_t cache_until;
 	char tm[128];
 	struct tm *l_tm;
