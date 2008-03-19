@@ -30,7 +30,7 @@ NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
 subdir = .
-DIST_COMMON = README $(am__configure_deps) $(srcdir)/Makefile.am \
+DIST_COMMON = $(am__configure_deps) $(srcdir)/Makefile.am \
 	$(srcdir)/Makefile.in $(top_srcdir)/configure AUTHORS COPYING \
 	INSTALL depcomp install-sh missing
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -72,7 +72,6 @@ APRCONFIG = @APRCONFIG@
 APR_CFLAGS = @APR_CFLAGS@
 APR_INCLUDES = @APR_INCLUDES@
 APR_LIBS = @APR_LIBS@
-APR_MEMCACHE_LIBS = @APR_MEMCACHE_LIBS@
 APUCONFIG = @APUCONFIG@
 APU_INCLUDES = @APU_INCLUDES@
 APU_LIBS = @APU_LIBS@
@@ -103,7 +102,6 @@ LDFLAGS = @LDFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LTLIBOBJS = @LTLIBOBJS@
-LUA_LIBS = @LUA_LIBS@
 MAKEINFO = @MAKEINFO@
 MKDIR_P = @MKDIR_P@
 MYSQLCONFIG = @MYSQLCONFIG@
@@ -167,7 +165,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 SUBDIRS = common db server
-AM_CFLAGS = -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_MEMCACHE_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
+AM_CFLAGS = -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
 all: all-recursive
 
 .SUFFIXES:

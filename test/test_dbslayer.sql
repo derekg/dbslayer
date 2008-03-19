@@ -62,62 +62,9 @@ CREATE TABLE `City` (
   `Name` char(35) NOT NULL default '',
   `CountryCode` char(3) NOT NULL default '',
   `District` char(20) NOT NULL default '',
- `Population` int(11) NOT NULL default '0',
+  `Population` int(11) NOT NULL default '0',
   PRIMARY KEY  (`ID`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-DROP TABLE IF EXISTS `Building`;
-CREATE TABLE `Building` (
-      `id` int NOT NULL auto_increment,
-      `address` varchar(255),
-      `square_footage` int NULL,
-      `city_id` int NOT NULL,
-      PRIMARY KEY(`id`)
-     
-)  ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-DROP TABLE IF EXISTS `Apartment`;
-CREATE TABLE `Apartment` (
-      `id` int NOT NULL auto_increment,
-      `square_footage` int NULL,
-      `rooms` int NULL,
-      `bathrooms` int NULL,
-      `building_id` int NOT NULL,
-      PRIMARY KEY(`id`)
-)  ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-DROP TABLE IF EXISTS `Tenant`;
-CREATE TABLE `Tenant` (
-       `id` int NOT NULL auto_increment,
-       `name` varchar(255) NOT NULL,
-       `dob` datetime NULL,
-       `apartment_id` int NOT NULL,
-       PRIMARY KEY(`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-DROP TABLE IF EXISTS `CommunityAssociation`;
-CREATE TABLE `CommunityAssociation` (
-      `id` int NOT NULL auto_increment,
-      `type` char(255),
-      PRIMARY KEY(`id`)     
-)  ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-DROP TABLE IF EXISTS `Membership`;
-CREATE TABLE `Membership` (
-      `tenant_id` int NOT NULL,
-      `community_association_id` int NOT NULL
-)  ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-DROP TABLE IF EXISTS `TenantLanguage`;
-CREATE TABLE `TenantLanguage` (
-      `tenant_id` int NOT NULL,
-      `CountryCode` char(3) NOT NULL
-)  ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-
-
 
 --
 -- Dumping data for table `City`
@@ -5473,5 +5420,11 @@ INSERT INTO `CountryLanguage` VALUES ('CHN','Dong','F',0.2);
 INSERT INTO `CountryLanguage` VALUES ('RUS','Belorussian','F',0.3);
 INSERT INTO `CountryLanguage` VALUES ('USA','Portuguese','F',0.2);
 
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
->>>>>>> .merge-right.r40

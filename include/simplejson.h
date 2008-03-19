@@ -12,8 +12,6 @@
 #include <apr_tables.h>
 #include <apr_hash.h>
 #include <apr_strings.h>
-#include <apr_time.h>
-
 
 typedef struct { 
 	const char *jstring;
@@ -47,22 +45,15 @@ json_value * decode_json(const char *injson,apr_pool_t *mpool);
 void encode_json(json_value *json);
 
 /** HELPER FUNCTION **/ 
-json_value* json_create_null(apr_pool_t *mpool);
-json_value* json_create_long(apr_pool_t *mpool,long number);
-json_value* json_create_double(apr_pool_t *mpool,double number);
-json_value* json_create_string(apr_pool_t *mpool,const char *string);
-json_value* json_create_boolean(apr_pool_t *mpool,char b);
-json_value* json_create_object(apr_pool_t *mpool);
-json_value* json_create_array(apr_pool_t *mpool,int size);
-void  json_add_object(json_value *jobject, const char *key, json_value *value); 
-void  json_append_array(json_value *jarray,  json_value *value); 
-char* json_serialize(apr_pool_t *mpool, json_value *json);
-apr_status_t json_get_string(json_value *injson, const char * key, json_value **value);
-apr_status_t json_get_sql(json_value *injson, json_value **sql);
-apr_status_t json_get_cache_ttl(json_value *injson, long *cache_ttl );
-int json_allows_caching(json_value *json);
-apr_status_t json_get_cache_ttl(json_value *injson, long *cache_ttl );
-#define JSON_KEY_SQL "SQL"
-#define JSON_KEY_CACHE "CACHE"
+json_value* json_null_create(apr_pool_t *mpool);
+json_value* json_long_create(apr_pool_t *mpool,long number);
+json_value* json_double_create(apr_pool_t *mpool,double number);
+json_value* json_string_create(apr_pool_t *mpool,const char *string);
+json_value* json_boolean_create(apr_pool_t *mpool,char b);
+json_value* json_object_create(apr_pool_t *mpool);
+json_value* json_array_create(apr_pool_t *mpool,int size);
+void  json_object_add(json_value *jobject, const char *key, json_value *value); 
+void  json_array_append(json_value *jarray,  json_value *value); 
+char * json_serialize(apr_pool_t *mpool, json_value *json);
 
 #endif //_SIMPLEJSON_H_

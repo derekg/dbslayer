@@ -63,26 +63,26 @@ char * dbslayer_stats_tojson(dbslayer_stats_t *istats,apr_pool_t *mpool) {
 	dbslayer_stats_t stats;
 	dbslayer_stats_get(istats,&stats);
 
-	json_value *container = json_create_object(mpool);
-	json_add_object(container,"total_requests",json_create_long(mpool,stats.total_requests));
-	json_value *hits = json_create_array(mpool,stats.nslice);
-	json_value *slices = json_create_array(mpool,stats.nslice);
+	json_value *container = json_object_create(mpool);
+	json_object_add(container,"total_requests",json_long_create(mpool,stats.total_requests));
+	json_value *hits = json_array_create(mpool,stats.nslice);
+	json_value *slices = json_array_create(mpool,stats.nslice);
 	int i;
 	for( i  = stats.offset+1; i < stats.nslice; i++) { 
 		if (stats.slices[i] != 0) { 
-			json_append_array(hits,json_create_long(mpool,stats.hits[i]));
-			json_append_array(slices,json_create_long(mpool,stats.slices[i]));
+			json_array_append(hits,json_long_create(mpool,stats.hits[i]));
+			json_array_append(slices,json_long_create(mpool,stats.slices[i]));
 		}
 	}
 	for( i = 0; i < stats.offset; i++) { 
 		if (stats.slices[i] != 0) { 
-			json_append_array(hits,json_create_long(mpool,stats.hits[i]));
-			json_append_array(slices,json_create_long(mpool,stats.slices[i]));
+			json_array_append(hits,json_long_create(mpool,stats.hits[i]));
+			json_array_append(slices,json_long_create(mpool,stats.slices[i]));
 		}
 	}
-	json_add_object(container,"hits",hits);
-	json_add_object(container,"slices",slices);
-	json_add_object(container,"start_time",json_create_long(mpool,stats.start_time));
-	json_add_object(container,"current_time",json_create_long(mpool,apr_time_now() / (1000*1000)));
+	json_object_add(container,"hits",hits);
+	json_object_add(container,"slices",slices);
+	json_object_add(container,"start_time",json_long_create(mpool,stats.start_time));
+	json_object_add(container,"current_time",json_long_create(mpool,apr_time_now() / (1000*1000)));
 	return json_serialize(mpool,container);
 }
