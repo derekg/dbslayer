@@ -1,9 +1,10 @@
 #include "simplejson.h"
 #include "slayer_utf8.h"
 
-/* $Id: simplejson.c,v 1.5 2007/05/25 16:54:31 derek Exp $ */
+/* $Id: simplejson.c,v 1.6 2008/02/29 00:18:51 derek Exp $ */
 
 /** create json_value objects **/
+
 
 /** decode json from a string **/
 json_value* decode_json_array(json_string *injson);
@@ -22,52 +23,90 @@ void encode_json_string(json_value *json);
 void encode_json_null(json_value *json);
 void encode_json_number(json_value *json);
 
-json_value* decode_json_array(json_string *injson) { 
-	if(injson == NULL || injson->offset == NULL) return NULL;
+typedef struct _json_link_t {
+	json_value *value;
+	struct _json_link_t *next;
+} json_link_t;
 
+json_value* decode_json_array(json_string *injson) { 
+	if(injson == NULL || injson->offset == NULL || injson->offset >= injson->end) return NULL;
+
+	apr_pool_t *link_pool;
+	
+	json_link_t *head,*node;
+	int link_count = 0;
+	head = node = NULL;
+	
+	/*
 	json_value *out = apr_palloc(injson->mpool,sizeof(json_value));
-	out->value.array = apr_array_make(injson->mpool,strlen(injson->offset)/2,sizeof(json_value *));
+	out->value.array = apr_array_make(injson->mpool,100,sizeof(json_value *));
 	out->type = JSON_ARRAY;
+	*/
 
 	injson->offset++; // toss of the leading [
-	while(isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	if(injson->offset >= injson->end) return NULL;
 	if(*(injson->offset) == ']') {
 		injson->offset++;
-		return out;
+		return json_array_create(injson->mpool,1);
 	}
 		
 	json_value *element = decode_json_value(injson);
 	if(element==NULL) return NULL;
-	*((json_value**)(apr_array_push(out->value.array))) = element;
+	apr_pool_create(&link_pool,NULL);
+	head = node = apr_pcalloc(link_pool,sizeof(json_link_t));
+	node->value = element;
+	link_count++;
+	//*((json_value**)(apr_array_push(out->value.array))) = element;
 	
-	while(*(injson->offset)!='\0' && *(injson->offset)!=']') { 
-		while(isspace(*injson->offset)) injson->offset++;
+	while( injson->offset < injson->end && *(injson->offset)!=']') { 
+		while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+		if(injson->offset >= injson->end) return NULL;
 		switch(*(injson->offset)) { 
 			case ']':
 					goto array_closure;
 			case ',':
 					injson->offset++;
 					if((element = decode_json_value(injson))==NULL) {
+						apr_pool_destroy(link_pool);
 						return NULL;
 					}
-					*((json_value**)(apr_array_push(out->value.array))) = element;
+					//*((json_value**)(apr_array_push(out->value.array))) = element;
+					node->next = apr_pcalloc(link_pool,sizeof(json_link_t));
+					node->next->value = element;
+					node = node->next;
+					link_count++;
 					break;
 			default:
+					apr_pool_destroy(link_pool);
 					return NULL;
 		}
 	}
 array_closure:
-		if(*(injson->offset) !=']') return NULL;
+		if(injson->offset >= injson->end || *(injson->offset) !=']'){
+			apr_pool_destroy(link_pool);
+			 return NULL;
+		}
 		injson->offset++; //chew up trailing ']'
+		json_value *out = apr_palloc(injson->mpool,sizeof(json_value));
+		out->value.array = apr_array_make(injson->mpool,link_count,sizeof(json_value *));
+		out->type = JSON_ARRAY;
+		node = head;
+		while(node) { 
+			*((json_value**)(apr_array_push(out->value.array))) = node->value;
+			node = node->next;	
+		}
+		apr_pool_destroy(link_pool);
 	return out;
 }
+
 
 json_value* decode_json_object(json_string *injson){
 
 	if(injson == NULL || injson->offset == NULL) return NULL;
 
 	json_value *out = apr_palloc(injson->mpool,sizeof(json_value));
-	out->value.object = apr_hash_make(injson->mpool);
+	out->value.object = json_skip_create(injson->mpool,7,(json_skip_cmp_t)strcmp);
 	out->type = JSON_OBJECT;
 
 	injson->offset++; // toss of the leading  {
@@ -79,41 +118,41 @@ json_value* decode_json_object(json_string *injson){
 	}
 
 	//PULL OUT THE FIRST VALUE
-	while(isspace(*injson->offset)) injson->offset++;
-	if(*(injson->offset) != '"') return NULL;
+	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	if(injson->offset >= injson->end || *(injson->offset) != '"') return NULL;
 	json_value *name = decode_json_string(injson);
 	if(name == NULL) return NULL;
-	while(isspace(*injson->offset)) injson->offset++;
-	if(*(injson->offset) != ':') return NULL;
+	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	if(injson->offset >= injson->end || *(injson->offset) != ':') return NULL;
 	injson->offset++; //eat the :
-	while(isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
 	json_value *value = decode_json_value(injson);
 	if(value == NULL) return NULL;
-	apr_hash_set(out->value.object,name->value.string,APR_HASH_KEY_STRING,value);
+	json_skip_put(out->value.object,name->value.string,value);
 
-	while(*(injson->offset) != '\0' && *(injson->offset) != '}') { 
-		while(isspace(*injson->offset)) injson->offset++;
-		if(*(injson->offset) == '}')  {
+	while( injson->offset < injson->end && *(injson->offset) != '}') { 
+		while( injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+		if(injson->offset < injson->end && *(injson->offset) == '}')  {
 			goto object_closure;
-		} else if (*(injson->offset) == ',') { 
+		} else if (injson->offset < injson->end &&*(injson->offset) == ',') { 
 			injson->offset++; // eat the comma
-			while(isspace(*injson->offset)) injson->offset++;
-			if(*(injson->offset) != '"') return NULL;
+			while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+			if(injson->offset >= injson->end || *(injson->offset) != '"') return NULL;
 			json_value *name = decode_json_string(injson);
 			if(name == NULL) return NULL;
-			while(isspace(*injson->offset)) injson->offset++;
-			if(*(injson->offset) != ':') return NULL;
+			while(injson->offset < injson->end &&isspace(*injson->offset)) injson->offset++;
+			if(injson->offset >= injson->end ||*(injson->offset) != ':') return NULL;
 			injson->offset++;
-			while(isspace(*injson->offset)) injson->offset++;
+			while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
 			json_value *value = decode_json_value(injson);
 			if(value == NULL) return NULL;
-			apr_hash_set(out->value.object,name->value.string,APR_HASH_KEY_STRING,value);
+			json_skip_put(out->value.object,name->value.string,value);
 		} else {
 			return NULL;
 		}
 	}
 object_closure:
-		if(*(injson->offset) !='}') return NULL;
+		if(injson->offset >= injson->end ||*(injson->offset) !='}') return NULL;
 		injson->offset++; //chew up trailing '}'
 	return out;
 }
@@ -123,7 +162,7 @@ json_value* decode_json_string(json_string *injson) {
 	const char *ptr;
 	injson->offset++; //advance past the \"
 	ptr = injson->offset;
-	while( *ptr!='\0' && *ptr !='"') { 
+	while( ptr< injson->end && *ptr !='"') { 
 			if(*ptr == '\\') { 
 							ptr++;
 							switch(*ptr) { 
@@ -144,7 +183,7 @@ json_value* decode_json_string(json_string *injson) {
 			ptr++;
 	}
 	//make sure the string is terminated w/ "
-	if(*ptr == '\0') return NULL;
+	if(ptr >= injson->end) return NULL;
 
 	int vsize  = (ptr - injson->offset) + 1;
 	out = apr_palloc(injson->mpool,sizeof(json_value));
@@ -152,9 +191,10 @@ json_value* decode_json_string(json_string *injson) {
 	memset(out->value.string,0,vsize);
 	out->type = JSON_STRING;
 	char * optr =  out->value.string;
-	while( *(injson->offset) !='\0' && *(injson->offset) !='"') { 
+	while( injson->offset <  injson->end && *(injson->offset) !='"') { 
 		if(*(injson->offset) == '\\') { 
 			injson->offset++;
+			if(injson->offset >= injson->end )  { return NULL; }
 			switch(*(injson->offset)) { 
 				case 'u':  // we are not excepting this for now - use UTF-8
 					/** THIS IS REQUIRED TO A 4 DIGIT HEX NUMBER **/
@@ -205,18 +245,18 @@ json_value* decode_json_string(json_string *injson) {
 		}
 		injson->offset++;
 	}
-	if(*(injson->offset) != '"')  { return NULL; } 
+	if(injson->offset >= injson->end ||*(injson->offset) != '"')  { return NULL; } 
 	injson->offset++;
 	return out;
 }
 json_value* decode_json_boolean(json_string *injson){
 	json_value *out = NULL;
-	if(strncmp("true",injson->offset,4) == 0) { 
+	if(injson->end - injson->offset > 3  && strncmp("true",injson->offset,4) == 0) { 
 		out = apr_palloc(injson->mpool,sizeof(json_value));
 		out->value.boolean = 1;
 		out->type = JSON_BOOLEAN;
 		injson->offset +=4;
-	} else if (strncmp("false",injson->offset,5)==0){
+	} else if (injson->end - injson->offset > 4 && strncmp("false",injson->offset,5)==0){
 		out = apr_palloc(injson->mpool,sizeof(json_value));
 		out->value.boolean = 0;
 		out->type = JSON_BOOLEAN;
@@ -227,10 +267,10 @@ json_value* decode_json_boolean(json_string *injson){
 
 json_value* decode_json_number(json_string *injson){
 	json_value *out = NULL;
-	char *optr = NULL;
+	char *optr = (char*)injson->end;
 	const char *pptr = injson->offset;
 	char isfloat = 0;
-	while( pptr ) {  
+	while( pptr != NULL && pptr < injson->end) {  
 		if(isdigit(*pptr) || (*pptr == '-' && pptr == injson->offset)) { 
 			pptr++;
 		}else { 
@@ -267,7 +307,7 @@ json_value* decode_json_number(json_string *injson){
 
 json_value * decode_json_null(json_string *injson) { 
 	json_value *out = NULL;
-	if(strncmp(injson->offset,"null",4) == 0) { 
+	if(injson->end - injson->offset > 3 && strncmp(injson->offset,"null",4) == 0) { 
 		out = apr_palloc(injson->mpool,sizeof(json_value));
 		out->type = JSON_NULL;
 		injson->offset +=4;
@@ -304,17 +344,18 @@ json_value * decode_json_value(json_string *injson) {
 	return outjson;
 }
 
-json_value * decode_json(const char *injson,apr_pool_t *mpool) { 
+json_value * decode_json(const char *injson,int injson_size, apr_pool_t *mpool) { 
 	json_string jstring;
 	jstring.jstring = injson;
+	jstring.end = injson + injson_size;
 	jstring.offset = injson;
 	jstring.mpool = mpool;
 
 	json_value *out = decode_json_value(&jstring);
 
 	//chew up trailing ws - and check for crap at the end
-	while(isspace(*(jstring.offset))) jstring.offset++;
-	if(*(jstring.offset)!='\0') { out = NULL; }
+	while(jstring.offset < jstring.end && isspace(*(jstring.offset))) jstring.offset++;
+	if(jstring.offset != jstring.end ) { out = NULL; }
 	return out;
 }
 
@@ -333,25 +374,22 @@ void encode_json_array(json_value *json) {
 
 void encode_json_object(json_value *json) { 
 	printf("{");
-	if(apr_hash_count(json->value.object)) {
-		apr_pool_t *mpool;
-		apr_pool_create(&mpool,NULL);
-		apr_hash_index_t *index = apr_hash_first(mpool,json->value.object);
-		while(index !=NULL) { 
-			apr_ssize_t key_size;
-			const void *_key;
-			void * _value;
-			json_value key;
-			apr_hash_this(index,&_key,&key_size,&_value);
-			key.type = JSON_STRING;
-			key.value.string = (char *)_key;
-			encode_json_string(&key);
-			printf(" : ");
-			encode_json((json_value*)_value);
-			index = apr_hash_next(index);
-			if(index) printf(",");
-		}
-		apr_pool_destroy(mpool);
+	if(json->value.object->node_count) {
+                json_skip_node_t *list = json->value.object->node->next_list[0];
+                if(list) {
+                        do{
+				const char *k = (const char*) list->key;	
+                                json_value *v = (json_value *)list->data;
+				json_value key;
+				key.type = JSON_STRING;
+				key.value.string = (char *)k;
+				encode_json_string(&key);
+				printf(" : ");
+				encode_json(v);
+                                list = list->next_list[0];
+				if(list) printf(",");
+                        }while(list!=NULL);
+                }
 	}
 	printf("}");
 }

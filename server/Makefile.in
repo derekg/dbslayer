@@ -42,8 +42,7 @@ CONFIG_CLEAN_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 binPROGRAMS_INSTALL = $(INSTALL_PROGRAM)
 PROGRAMS = $(bin_PROGRAMS)
-am_dbslayer_OBJECTS = dbslayer.$(OBJEXT) dbslayer_logging.$(OBJEXT) \
-	dbslayer_stats.$(OBJEXT)
+am_dbslayer_OBJECTS = dbslayer_server.$(OBJEXT)
 dbslayer_OBJECTS = $(am_dbslayer_OBJECTS)
 am__DEPENDENCIES_1 =
 dbslayer_DEPENDENCIES = $(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
@@ -159,7 +158,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 dbslayer_LDADD = -L@top_srcdir@/common -lsimplejson -L@top_srcdir@/db -ldbaccess $(APU_LIBS) $(APR_LIBS)  $(MYSQL_LIBS) 
 AM_CFLAGS = $(MYSQL_CFLAGS) $(APR_CFLAGS) $(APU_CFLAGS) -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
-dbslayer_SOURCES = dbslayer.c dbslayer_logging.c dbslayer_stats.c
+dbslayer_SOURCES = dbslayer_server.c
 all: all-am
 
 .SUFFIXES:
@@ -173,9 +172,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --gnu  server/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign  server/Makefile'; \
 	cd $(top_srcdir) && \
-	  $(AUTOMAKE) --gnu  server/Makefile
+	  $(AUTOMAKE) --foreign  server/Makefile
 .PRECIOUS: Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
@@ -226,9 +225,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dbslayer.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dbslayer_logging.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dbslayer_stats.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dbslayer_server.Po@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<

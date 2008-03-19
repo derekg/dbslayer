@@ -578,7 +578,7 @@ PACKAGE_BUGREPORT=''
 
 ac_unique_file="db/dbaccess.c"
 ac_unique_file="common/urldecode.c"
-ac_unique_file="server/dbslayer.c"
+ac_unique_file="server/dbslayer_server.c"
 # Factoring default headers for most tests.
 ac_includes_default="\
 #include <stdio.h>

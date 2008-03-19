@@ -1,6 +1,6 @@
 #include "simplejson.h"
 
-/* $Id: jsonhelper.c,v 1.2 2007/05/09 20:55:00 derek Exp $ */
+/* $Id: jsonhelper.c,v 1.3 2008/02/29 00:18:51 derek Exp $ */
 
 /** HELPER FUNCTION **/ 
 json_value* json_null_create(apr_pool_t *mpool) {
@@ -35,7 +35,7 @@ json_value* json_boolean_create(apr_pool_t *mpool,char b){
 json_value* json_object_create(apr_pool_t *mpool){
 	json_value *out = apr_palloc(mpool,sizeof(json_value));
 	out->type = JSON_OBJECT;
-	out->value.object = apr_hash_make(mpool);
+	out->value.object = json_skip_create(mpool,7,(json_skip_cmp_t)strcmp);
 	return out;
 }
 json_value* json_array_create(apr_pool_t *mpool,int asize) {
@@ -45,7 +45,7 @@ json_value* json_array_create(apr_pool_t *mpool,int asize) {
 	return out;
 }
 void  json_object_add(json_value *jobject, const char *key, json_value *value) {
-	apr_hash_set(jobject->value.object,key,APR_HASH_KEY_STRING,value);
+	json_skip_put(jobject->value.object,(char*)key,value);
 }
 void  json_array_append(json_value *jarray,  json_value *value) {
 	*((json_value**)(apr_array_push(jarray->value.array))) = value;

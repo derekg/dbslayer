@@ -12,8 +12,9 @@
 #include <apr_lib.h>
 #include <apr_hash.h>
 
-/* $Id: slayer_util.h,v 1.2 2007/05/09 20:55:00 derek Exp $ */
-
+#include "json_skip.h"
+/* $Id: slayer_util.h,v 1.3 2008/02/29 00:18:53 derek Exp $ */
 char * urldecode(apr_pool_t *mpool, char *in);
+json_skip_head_t * parse_qstring(apr_pool_t *mpool,const char *qstring);
 
 #endif  //_SLAYER_UTIL_H_

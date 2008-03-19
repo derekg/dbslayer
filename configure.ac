@@ -6,7 +6,7 @@ AC_INIT(dbslayer, 1.0)
 AM_INIT_AUTOMAKE(dbslayer, 1.0)
 AC_CONFIG_SRCDIR([db/dbaccess.c])
 AC_CONFIG_SRCDIR([common/urldecode.c])
-AC_CONFIG_SRCDIR([server/dbslayer.c])
+AC_CONFIG_SRCDIR([server/dbslayer_server.c])
 #AC_CONFIG_HEADER([config.h])
 
 dnl apache run time apr is required

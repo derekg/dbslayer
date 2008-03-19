@@ -43,9 +43,13 @@ AR = ar
 ARFLAGS = cru
 libsimplejson_a_AR = $(AR) $(ARFLAGS)
 libsimplejson_a_LIBADD =
-am__objects_1 = simplejson.$(OBJEXT) jsonhelper.$(OBJEXT) \
-	urldecode.$(OBJEXT) serializejson.$(OBJEXT) \
-	slayer_utf8.$(OBJEXT)
+am__objects_1 = json2xml.$(OBJEXT) jsonhelper.$(OBJEXT) \
+	json_skip.$(OBJEXT) qstring_parse.$(OBJEXT) \
+	serializejson.$(OBJEXT) simplejson.$(OBJEXT) \
+	slayer_http_fileserver.$(OBJEXT) slayer_http_parse.$(OBJEXT) \
+	slayer_http_server.$(OBJEXT) slayer_server_logging.$(OBJEXT) \
+	slayer_server_stats.$(OBJEXT) slayer_utf8.$(OBJEXT) \
+	urldecode.$(OBJEXT)
 am_libsimplejson_a_OBJECTS = $(am__objects_1)
 libsimplejson_a_OBJECTS = $(am_libsimplejson_a_OBJECTS)
 DEFAULT_INCLUDES = -I.@am__isrc@
@@ -160,7 +164,7 @@ top_srcdir = @top_srcdir@
 noinst_LIBRARIES = libsimplejson.a
 AM_CFLAGS = $(MYSQL_CFLAGS) $(APR_CFLAGS) $(APU_CFLAGS)
 INCLUDES = -I@top_srcdir@/include $(MYSQL_INCLUDES) $(APR_INCLUDES) $(APU_INCLUDES)
-SRC = simplejson.c jsonhelper.c  urldecode.c serializejson.c slayer_utf8.c
+SRC = json2xml.c jsonhelper.c json_skip.c qstring_parse.c serializejson.c simplejson.c slayer_http_fileserver.c slayer_http_parse.c slayer_http_server.c slayer_server_logging.c slayer_server_stats.c slayer_utf8.c urldecode.c
 libsimplejson_a_SOURCES = $(SRC)
 all: all-am
 
@@ -175,9 +179,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --gnu  common/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign  common/Makefile'; \
 	cd $(top_srcdir) && \
-	  $(AUTOMAKE) --gnu  common/Makefile
+	  $(AUTOMAKE) --foreign  common/Makefile
 .PRECIOUS: Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
@@ -209,9 +213,17 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/json2xml.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/json_skip.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/jsonhelper.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/qstring_parse.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/serializejson.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/simplejson.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_http_fileserver.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_http_parse.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_http_server.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_server_logging.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_server_stats.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slayer_utf8.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/urldecode.Po@am__quote@
 

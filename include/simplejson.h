@@ -10,12 +10,13 @@
 #include <apr.h>
 #include <apr_pools.h>
 #include <apr_tables.h>
-#include <apr_hash.h>
 #include <apr_strings.h>
+#include "json_skip.h"
 
 typedef struct { 
 	const char *jstring;
 	const char *offset;
+	const char *end;
 	apr_pool_t *mpool;
 } json_string; 
 
@@ -31,7 +32,7 @@ typedef enum {
 
 typedef struct {
 	union {
-		apr_hash_t *object;
+		json_skip_head_t *object;
 		apr_array_header_t *array;
 		double dnumber;
 		long lnumber;
@@ -41,7 +42,8 @@ typedef struct {
 	JSON_TYPES type;
 } json_value;
 
-json_value * decode_json(const char *injson,apr_pool_t *mpool);
+//json_value * decode_json(const char *injson,apr_pool_t *mpool);
+json_value * decode_json(const char *injson,int size, apr_pool_t *mpool);
 void encode_json(json_value *json);
 
 /** HELPER FUNCTION **/ 

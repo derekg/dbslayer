@@ -1,7 +1,7 @@
 #include "simplejson.h"
 #include <apr_buckets.h>
 
-/* $Id: serializejson.c,v 1.6 2007/05/28 15:23:57 derek Exp $ */
+/* $Id: serializejson.c,v 1.8 2008/02/29 00:18:51 derek Exp $ */
 
 static apr_status_t json_object_serialize(apr_bucket_brigade *bbrigade, apr_pool_t*, json_value *json);
 static apr_status_t json_array_serialize(apr_bucket_brigade *bbrigade, apr_pool_t*,json_value *json);
@@ -24,23 +24,23 @@ apr_status_t json_array_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpoo
 
 apr_status_t json_object_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,json_value *json) { 
 	apr_status_t status;
-	if(apr_hash_count(json->value.object)) {
-		apr_hash_index_t *index = apr_hash_first(mpool,json->value.object);
+	if(json->value.object->node_count) {
+                json_skip_node_t *list = json->value.object->node->next_list[0];
 		status  = apr_brigade_printf(bbrigade,NULL,NULL,"{");
-		while(index !=NULL) { 
-			apr_ssize_t key_size;
-			const void *_key;
-			void * _value;
-			json_value key;
-			apr_hash_this(index,&_key,&key_size,&_value);
-			key.type = JSON_STRING;
-			key.value.string = (char *)_key;
-			status = json_string_serialize(bbrigade,mpool,&key);
-			status = apr_brigade_printf(bbrigade,NULL,NULL," : ");
-			status = json_serialize_internal(bbrigade,mpool,(json_value*)_value);
-			index = apr_hash_next(index);
-			status = apr_brigade_printf(bbrigade,NULL,NULL,index  ? " , ": "}");
-		}
+                if(list) {
+                        do{
+				const char *k = (const char*) list->key;	
+                                json_value *v = (json_value *)list->data;
+				json_value key;
+				key.type = JSON_STRING;
+				key.value.string = (char *)k;
+				status = json_string_serialize(bbrigade,mpool,&key);
+				status = apr_brigade_printf(bbrigade,NULL,NULL," : ");
+				status = json_serialize_internal(bbrigade,mpool,(json_value*)v);
+                                list = list->next_list[0];
+				status = apr_brigade_printf(bbrigade,NULL,NULL,list ? " , ": "}");
+                        }while(list!=NULL);
+                }
 	} else{
 		status = apr_brigade_printf(bbrigade,NULL,NULL,"{}");
 	}
@@ -106,6 +106,7 @@ char * json_serialize(apr_pool_t *mpool, json_value *json) {
   apr_bucket_brigade*  bbrigade = apr_brigade_create(mpool, bucket_allocator);
 	json_serialize_internal(bbrigade,mpool,json);
   apr_brigade_length(bbrigade,0,&bl);
+ 
   char *out = apr_pcalloc(mpool,bl+1);
   apr_size_t len = bl;
   apr_brigade_flatten(bbrigade,out,&len);
