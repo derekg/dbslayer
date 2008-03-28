@@ -89,7 +89,7 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 		fprintf(stderr,"couldn't bind to %s:%d\n",server->hostname ? server->hostname: "*", server->port);
 		exit(-1);
 	}
-	status = apr_socket_listen(conn,3);
+	status = apr_socket_listen(conn,128);
 	status = apr_pollset_create(&pollset,sizeof(connections)/sizeof(slayer_http_connection_t*) +1 /* +1 for listenting socket */,server->mpool,0);
 	memset(connections,0,sizeof(connections) );
 	pfd_listen.p = server->mpool;
