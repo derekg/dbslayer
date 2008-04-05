@@ -75,7 +75,7 @@ apr_status_t json_number_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpo
 		return apr_brigade_printf(bbrigade,NULL,NULL,"%ld",json->value.lnumber);
 	} else {  
 		char *buf = apr_palloc(mpool,sizeof(char)*512);
-		snprintf(buf,512,"%g",json->value.dnumber);	
+		snprintf(buf,512,"%.16g",json->value.dnumber);	
 		//apr %g doesn't prepend leading 0 for values less than 1 - violates json parsers
 		return apr_brigade_printf(bbrigade,NULL,NULL,buf);
 	}
