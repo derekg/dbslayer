@@ -130,5 +130,5 @@ int main(int argc, char **argv) {
 	service_map[1]->service = &dummy_handler;
 */
 
-	return slayer_server_run(1,service_map,argc,argv,1024 * 1000 ,"dbslayer/beta-12");
+	return slayer_server_run(1,service_map,argc,argv,1024 * 1000 ,"dbslayer/beta-14");
 }
