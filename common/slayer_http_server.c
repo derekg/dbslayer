@@ -60,7 +60,7 @@ static int request_parse(apr_socket_t *conn, slayer_http_request_parse_t *http_r
 	if (http_request->request_state == PARSE_REQUEST_DONE) {
 		do {
 			parse_status = slayer_http_request_header_parse(http_request);
-		} while ( (http_request->buffer_marker < http_request->buffer + http_request->buffer_size) && http_request->header_state != PARSE_HEADER_DONE);
+		} while ( parse_status != -1 && (http_request->buffer_marker < http_request->buffer + http_request->buffer_size) && http_request->header_state != PARSE_HEADER_DONE);
 	}
 	return parse_status;
 }
