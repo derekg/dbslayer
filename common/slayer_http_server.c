@@ -79,7 +79,7 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 	int connections_count = 0;
 	slayer_http_connection_t *connections[500];
 
-	//sigset(SIGPIPE,SIG_IGN);
+	sigset(SIGPIPE,SIG_IGN);
 	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,server->mpool);
 	status = apr_socket_opt_set(conn,APR_SO_REUSEADDR,1);
 	status = apr_socket_opt_set(conn,APR_SO_NONBLOCK,1);
