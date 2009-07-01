@@ -7,7 +7,7 @@
 #include <apr_portable.h>
 
 static unsigned int dbcounter = 0;
-apr_thread_mutex_t *dbcounter_mutex;
+static apr_thread_mutex_t *dbcounter_mutex;
 
 typedef struct _dbslayer_config_t { 
 	char *server;
