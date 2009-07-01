@@ -6,6 +6,9 @@
 
 #include <apr_portable.h>
 
+static unsigned int dbcounter = 0;
+apr_thread_mutex_t *dbcounter_mutex;
+
 typedef struct _dbslayer_config_t { 
 	char *server;
 	char *multiserver;
@@ -34,6 +37,9 @@ void * db_global_init(apr_pool_t *pmpool, int argc, char **argv) {
 		fprintf(stderr,"Failed to configure dbslayer - [-s server[:server] or -m server[:server] ] and -c configure are required arguments\n");
 		exit(0);
 	}
+
+	apr_thread_mutex_create(&dbcounter_mutex,APR_THREAD_MUTEX_DEFAULT,pmpool);
+
 	return config;
 }
 void  db_global_destroy(void *_config) {
@@ -41,7 +47,10 @@ void  db_global_destroy(void *_config) {
 }
 void * db_thread_init(apr_pool_t *mpool, void *_global_config) {
 	dbslayer_config_t *config = (dbslayer_config_t*) _global_config;
-	unsigned int id =  apr_os_thread_current();
+	apr_thread_mutex_lock(dbcounter_mutex);	
+	unsigned int id =  dbcounter;// random();//apr_os_thread_current();
+	dbcounter++;
+	apr_thread_mutex_unlock(dbcounter_mutex);	
 	return db_handle_init(config->username,config->password,config->multiserver == NULL ? config->server : config->multiserver,config->configure,&id,config->multiserver == NULL ? 0 : 1);
 }
 void  db_thread_destroy(void *x) { 
@@ -130,5 +139,7 @@ int main(int argc, char **argv) {
 	service_map[1]->service = &dummy_handler;
 */
 
-	return slayer_server_run(1,service_map,argc,argv,1024 * 1000 ,"dbslayer/beta-17");
+
+	srandom(time(NULL));
+	return slayer_server_run(1,service_map,argc,argv,1024 * 1000 ,"dbslayer/beta-18");
 }

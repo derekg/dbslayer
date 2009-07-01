@@ -65,7 +65,8 @@ db_handle_t * db_handle_init(const char *_user, const char *_pass, const char *_
 	dbhandle->server[i++] = strdup(b);
 	unsigned int seed = *((unsigned int*)userarg);
 	free(server);
-	dbhandle->server_offset = seed  % dbhandle->server_count;
+	dbhandle->server_offset = seed > dbhandle->server_count ? seed % dbhandle->server_count : seed;
+	printf("%d\n",seed);
 	if(multidb == 0) { 
 		db_handle_reattach(dbhandle,"");
 	} else {
