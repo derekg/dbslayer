@@ -1,0 +1,60 @@
+DBSLAYER
+The DBacesslayer aka DBSlayer aka Släyer (as we like to call it when we're feeling ironically heavy metal) is a lightweight database abstraction layer suitable for high-load websites where you need the scalable advantages of connection pooling. Written in C for speed, DBSlayer talks to clients via JSON over HTTP, meaning it's simple to monitor and can swiftly interoperate with any web framework you choose.
+
+The DBSlayer originated as an internal tool at the New York Times. The typical LAMP strategy for scaling up data-driven applications is to replicate slave databases to every web server, but this approach can hit scaling limitations for high-volume websites, where processes can overwhelm their given backend DB's connection limits. Quite frankly, we wanted to scale the front-end webservers and backend database servers separately without having to coordinate them. We also needed a way to flexibly reconfigure where our backend databases were located and which applications used them without resorting to tricks of DNS or other such "load-balancing" hacks. Plus, it just seemed really cool to have a JSON-speaking DB layer that all our scriptable content could talk to. Thus, the DBSlayer was born.  
+
+
+Starting the DBSlayer is as simple as pointing the DBSlayer at your mysql.cnf file with a few command-line options:
+
+dbslayer -c /path/to/mysql.cnf -s servername
+This starts up a DBSlayer daemon on 9090 (this default port can be changed) which acts as a proxy for the backend MySQL server. This proxy can then be queried via JSON over HTTP. Here is a query against one of the standard MySQL test databases:
+
+select ci.* from City ci, Country c where c.name = 'United States' and c.code = ci.CountryCode order by Population desc limit 10;
+http://localhost:9090/db?%7B%22SQL%22:%22select%20ci.*%20from%20City%20ci,%20Country%20c%20where%20c.name%20=%20'United%20States'%20and%20c.code%20=%20ci.CountryCode%20order%20by%20Population%20desc%20limit%2010;%22%7D 
+
+HTTP/1.0 200 OK
+Date: Wed, 27 Jun 2007 20:55:59 GMT
+Server: dbslayer/server beta-9
+Connection: Close
+Content-type: text/plain; charset=utf-8
+Content-Length: 746
+
+{"RESULT" : {"TYPES" : ["MYSQL_TYPE_LONG" , "MYSQL_TYPE_STRING" , "MYSQL_TYPE_STRING" , "MYSQL_TYPE_STRING" , "MYSQL_TYPE_LONG"] ,
+             "HEADER" : ["ID" , "Name" , "CountryCode" , "District" , "Population"] , 
+             "ROWS" : [[3793 , "New York" , "USA" , "New York" , 8008278] ,
+                       [3794 , "Los Angeles" , "USA" , "California" , 3694820] ,
+                       [3795 , "Chicago" , "USA" , "Illinois" , 2896016] ,
+                       [3796 , "Houston" , "USA" , "Texas" , 1953631] ,
+                       [3797 , "Philadelphia" , "USA" , "Pennsylvania" , 1517550] ,
+                       [3798 , "Phoenix" , "USA" , "Arizona" , 1321045] , 
+                       [3799 , "San Diego" , "USA" , "California" , 1223400] , 
+                       [3800 , "Dallas" , "USA" , "Texas" , 1188580] , 
+                       [3801 , "San Antonio" , "USA" , "Texas" , 1144646] , 
+                       [3802 , "Detroit" , "USA" , "Michigan" , 951270]]}}
+
+
+As long as your programming language has HTTP request and JSON parsing libraries, calling the DBSlayer should be rather straightforward. Note: the DBSlayer currently only supports GET requests, although other HTTP verbs will be supported in future releases. See the section Coding Against the DBSlayer below for more practical details.
+
+Download
+The current version of the DBSlayer is beta-10
+
+A source package for Unix systems can be downloaded. There is no current support for Windows binaries, but we would welcome outside volunteers who want to help build them. It's been tested on Linux and Solaris-x86 boxes but should work on more machines (the DBSlayer is built on top of the cross-platform MySQL and Apache Portable Runtime libraries).
+
+Anonymous access to the Subversion source tree is available at http://www.dbslayer.org/svn/dbslayer, and a web-browsable version is located here within Trac.
+
+The DBSlayer is licensed under the Apache License, Version 2.0 (the "License"). You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Installing the DBSlayer requires the following other libraries must be installed first:
+
+the Apache Portable Runtime (APR) library (1.0 or above)
+the Apache Portable Runtime Utility (APU) library (1.0 or above)
+the MySQL 5 client libraries (5.0 or above)
+Once these are installed, you can build and install the DBSlayer using the standard GNU autoconf process:
+
+Unpack the DBSlayer archive
+./configure
+make
+sudo make install
+If the APR, APU, and MySQL libraries are installed in default locations, the configure script will find them. Otherwise, it may be necessary to specify the locations of apr-1-config, apu-1-config, and mysql-config with the --with-apr-1-config, --with-apu-1-config, and --with-mysql-config parameters to configure.
+
+
