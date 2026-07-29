@@ -21,26 +21,32 @@ static char * slayer_http_response_code_lookup(int code) {
 	return description;
 }
 
-int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *client, const char *mime_type, const char *message, int message_size){
+int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *client, const char *mime_type, const char *message, apr_ssize_t message_size){
 	apr_status_t status;
+	apr_size_t body_size, header_size, total;
 	char dstring[APR_RFC822_DATE_LEN];
 	apr_rfc822_date(dstring,apr_time_now());
-	if(message_size == -1) message_size = strlen(message);
+	body_size = (message_size < 0) ? strlen(message) : (apr_size_t)message_size;
+	client->request->payload_size = body_size;
 	char *header_response = slayer_http_response_code_lookup(client->request->response_code);
 	char *header = apr_pstrcat(client->request->mpool, "HTTP/1.0 ",header_response, "\r\n",
 	                                   "Date: ",dstring,"\r\n",
 	                                   "Server: ",server->server_name,"\r\n",
 	                                   "Content-type: ", mime_type, "\r\n",
-	                                   "Content-Length: ",apr_itoa(client->request->mpool,client->request->payload_size = message_size),"\r\n",
+	                                   "Content-Length: ",apr_psprintf(client->request->mpool,"%" APR_SIZE_T_FMT,body_size),"\r\n",
 	                                   "Connection: close\r\n",
 	                                   "\r\n",NULL);
 
-	int size; 
-	int	header_size = strlen(header); 
-	client->request->message_marker = client->request->message = apr_palloc(client->request->mpool, (size = header_size + message_size));
-	client->request->message_end = client->request->message_marker + size;
+	header_size = strlen(header);
+	if (body_size > APR_SIZE_MAX - header_size) {
+		//cannot happen with a real message, but never let the addition wrap
+		return APR_ENOMEM;
+	}
+	total = header_size + body_size;
+	client->request->message_marker = client->request->message = apr_palloc(client->request->mpool, total);
+	client->request->message_end = client->request->message_marker + total;
 	memcpy(client->request->message,header,header_size);
-	memcpy(client->request->message + header_size, message, message_size);
+	memcpy(client->request->message + header_size, message, body_size);
 	while ((status = apr_queue_push(server->out_queue,client)) == APR_EINTR);
 	return status;
 }

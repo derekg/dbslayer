@@ -64,7 +64,7 @@ int slayer_server_log_close(slayer_server_log_manager_t *manager) {
 	return 0;
 }
 int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *mpool, apr_socket_t *conn,
-                               const char *request_line, int response_code, int nbytes_sent, apr_int64_t time_toservice) {
+                               const char *request_line, int response_code, apr_size_t nbytes_sent, apr_int64_t time_toservice) {
 	//generate data
 	char dstring[1024];
 	apr_int64_t current_time = apr_time_now();
@@ -80,7 +80,9 @@ int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *
 	apr_sockaddr_ip_get(&client_ip,client_addr);
 	if (manager->fhandle) {
 		char *message = apr_pstrcat(mpool,client_ip," - - ","[",dstring,"] \"",request_line,"\" ",
-		                            apr_itoa(mpool,response_code)," ",apr_itoa(mpool,nbytes_sent), " ",apr_ltoa(mpool,time_toservice), "\n",NULL);
+		                            apr_itoa(mpool,response_code)," ",
+		                            apr_psprintf(mpool,"%" APR_SIZE_T_FMT,nbytes_sent), " ",
+		                            apr_ltoa(mpool,time_toservice), "\n",NULL);
 		slayer_server_log_message(manager,message);
 	}
 	slayer_server_log_add_entry(manager,mpool,client_ip,current_time,request_line,response_code,nbytes_sent,time_toservice);
@@ -117,14 +119,14 @@ int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_
 void slayer_server_log_add_entry(slayer_server_log_manager_t *manager, apr_pool_t *mpool,
                                   const char *client_ip,apr_int64_t rtime,
                                   const char *request_line,int response_code,
-                                  int nbytes_sent, apr_int64_t time_toservice ) {
+                                  apr_size_t nbytes_sent, apr_int64_t time_toservice ) {
 
 	json_value *container = json_object_create(mpool);
 	json_object_add(container,"client_ip",json_string_create(mpool,client_ip));
 	json_object_add(container,"request_time",json_long_create(mpool,rtime / (1000*1000)));
 	json_object_add(container,"request",json_string_create(mpool,request_line));
 	json_object_add(container,"response_code",json_long_create(mpool,response_code));
-	json_object_add(container,"bytes_sent",json_long_create(mpool,nbytes_sent));
+	json_object_add(container,"bytes_sent",json_long_create(mpool,(long)nbytes_sent));
 	json_object_add(container,"time_toservice",json_long_create(mpool,time_toservice));
 	char *json_entry = strdup(json_serialize(mpool,container)); //we want our own copy of this data
 

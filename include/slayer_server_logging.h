@@ -31,7 +31,7 @@ int slayer_server_log_message(slayer_server_log_manager_t *manager, const char *
 int slayer_server_log_close(slayer_server_log_manager_t *manager);
 
 int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *mpool, apr_socket_t *conn,
-                               const char *request_line, int response_code, int nbytes_sent, apr_int64_t time_toservices);
+                               const char *request_line, int response_code, apr_size_t nbytes_sent, apr_int64_t time_toservices);
 
 int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_t *mpool,apr_socket_t *conn,
                                    const char *request_line, const char * message);
@@ -39,7 +39,7 @@ int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_
 void slayer_server_log_add_entry(slayer_server_log_manager_t *manager, apr_pool_t *mpool,
                                   const char *client_ip,apr_int64_t rtime,
                                   const char *request_line,int response_code,
-                                  int nbytes_sent, apr_int64_t time_toservice );
+                                  apr_size_t nbytes_sent, apr_int64_t time_toservice );
 
 void slayer_server_log_add_error(slayer_server_log_manager_t *manager, apr_pool_t *mpool,
                                   const char *client_ip,apr_int64_t rtime,
