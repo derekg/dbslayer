@@ -3,8 +3,8 @@
 A lightweight database abstraction layer written in C that exposes MySQL connections as JSON over HTTP. Originally built at the New York Times for high-traffic web infrastructure where front-end servers and database servers needed to scale independently.
 
 **License:** Apache 2.0  
-**Language:** C (POSIX, APR, MySQL client lib)  
-**Status:** Production — 2026 maintenance branch with security hardening
+**Language:** C (POSIX, APR, MySQL client lib, OpenSSL)  
+**Status:** Production — 2026 maintenance branch with security hardening, TLS, and bearer auth
 
 ---
 
@@ -15,7 +15,7 @@ DBSlayer is a daemon that pools MySQL connections and serves them as an HTTP API
 ```
 [Client] --HTTP/JSON--> [DBSlayer] --MySQL protocol--> [MySQL]
                                  <--result sets----------
-         <--JSON response--     
+         <--JSON response--
 ```
 
 ### Example query
@@ -100,12 +100,13 @@ On error, the response includes `ROLLBACK_ON_ERROR` and `ROLLBACK_ON_ERROR_SUCCE
 - **APR-util** 1.2+ (`apu-1-config`)
 - **MySQL client** 5.0+ (`mysql_config`)
 - **GCC** with C99 support
+- **OpenSSL** 1.1+ (optional, for TLS — `libssl-dev`)
 - **Python 3.10+** (for tests only)
 
 Install on Debian/Ubuntu:
 
 ```bash
-sudo apt-get install libapr1-dev libaprutil1-dev libmysqlclient-dev gcc make
+sudo apt-get install libapr1-dev libaprutil1-dev libmysqlclient-dev libssl-dev gcc make
 ```
 
 ### Build
@@ -116,19 +117,28 @@ make
 sudo make install
 ```
 
+With TLS support:
+
+```bash
+./configure --with-openssl
+make
+sudo make install
+```
+
 If libraries are in non-standard locations:
 
 ```bash
 ./configure \
   --with-apr-1-config=/path/to/apr-1-config \
   --with-apu-1-config=/path/to/apu-1-config \
-  --with-mysql-config=/path/to/mysql_config
+  --with-mysql-config=/path/to/mysql_config \
+  --with-openssl=/path/to/openssl
 ```
 
 ### Verify
 
 ```bash
-./server/dbslayer --version
+./server/dbslayer -v
 python3 test/test_bugfixes.py
 ```
 
@@ -136,9 +146,60 @@ python3 test/test_bugfixes.py
 
 ## Usage
 
-```
+### Basic
+
+```bash
 dbslayer -s server[:server2] -c /path/to/mysql.cnf [options]
 ```
+
+### With authentication
+
+```bash
+dbslayer -s localhost -c /etc/mysql/dbslayer.cnf -k my-secret-token
+```
+
+Clients must send `Authorization: Bearer my-secret-token` header.
+
+### With TLS
+
+```bash
+dbslayer -s localhost -c /etc/mysql/dbslayer.cnf \
+  --tls-cert /etc/ssl/dbslayer.crt \
+  --tls-key /etc/ssl/dbslayer.key \
+  --tls-port 9443
+```
+
+Plaintext HTTP on `-p` port and TLS HTTPS on `--tls-port` run simultaneously.
+
+### With auth + TLS
+
+```bash
+dbslayer -s localhost -c /etc/mysql/dbslayer.cnf \
+  -k my-secret-token \
+  --tls-cert /etc/ssl/dbslayer.crt \
+  --tls-key /etc/ssl/dbslayer.key
+```
+
+### Credentials
+
+MySQL credentials are **never** passed on the command line. Use one of:
+
+1. **MySQL config file** (recommended) — the `-c` file's `[client]` or named group section:
+   ```ini
+   [mysqld1]
+   user = readonly
+   password = secret
+   host = 127.0.0.1
+   port = 3306
+   ```
+
+2. **Environment variables**:
+   ```bash
+   DBSLAYER_DB_USER=readonly DBSLAYER_DB_PASS=secret \
+     dbslayer -s localhost -c /etc/mysql/dbslayer.cnf
+   ```
+
+No passwords appear in `ps`, `/proc/pid/cmdline`, or `/stats/args`.
 
 ### Options
 
@@ -147,12 +208,15 @@ dbslayer -s server[:server2] -c /path/to/mysql.cnf [options]
 | `-s` | MySQL server name(s), colon-separated for round-robin | *required* |
 | `-c` | Path to MySQL config file (e.g. `my.cnf`) | *required* |
 | `-m` | Named-server mode (multiple backends, client selects per-request) | off |
-| `-u` | MySQL username | from config |
-| `-x` | MySQL password (redacted from `/stats/args`) | from config |
-| `-p` | Listen port | 9090 |
+| `-p` | Listen port (plaintext HTTP) | 9090 |
 | `-h` | Bind address | all interfaces |
 | `-t` | Worker thread count | 1 |
 | `-w` | Socket timeout (seconds) | 10 |
+| `-k` | Bearer auth token (also: `--auth-token`) | disabled |
+| `--auth-token-file` | Path to file containing bearer token | disabled |
+| `--tls-cert` | Path to TLS certificate (PEM) — enables TLS listener | disabled |
+| `--tls-key` | Path to TLS private key (PEM) | disabled |
+| `--tls-port` | TLS listener port | 9443 |
 | `-b` | Base directory for static file serving | disabled |
 | `-l` | Access log file path | none |
 | `-e` | Error log file path | none |
@@ -161,32 +225,51 @@ dbslayer -s server[:server2] -c /path/to/mysql.cnf [options]
 | `-d` | Debug mode (foreground, cores enabled) | daemonized |
 | `-v` | Print version and exit | |
 
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `DBSLAYER_DB_USER` | MySQL username (if not in config file) |
+| `DBSLAYER_DB_PASS` | MySQL password (if not in config file) |
+| `DBSLAYER_AUTH_TOKEN` | Bearer auth token (alternative to `-k`) |
+
 ### HTTP endpoints
 
-| Path | Auth | Description |
-|------|------|-------------|
-| `/db` | none | Execute SQL (JSON in query string) |
-| `/dbform` | none | Execute SQL (form params, easier for browser) |
-| `/stats` | none | Server statistics as JSON |
-| `/stats/log` | none | Recent request log (100 entries) |
-| `/stats/error` | none | Recent error log (100 entries) |
-| `/stats/args` | none | Startup arguments (passwords redacted) |
-| `/shutdown` | localhost only | Graceful shutdown |
-| `/*` | none | Static file serving (if `-b` is set) |
+| Path | Auth required | Description |
+|------|---------------|-------------|
+| `/db` | yes (if token set) | Execute SQL (JSON in query string) |
+| `/dbform` | yes (if token set) | Execute SQL (form params, easier for browser) |
+| `/stats` | yes (if token set) | Server statistics as JSON |
+| `/stats/log` | yes (if token set) | Recent request log (100 entries) |
+| `/stats/error` | yes (if token set) | Recent error log (100 entries) |
+| `/stats/args` | yes (if token set) | Startup arguments (passwords redacted) |
+| `/shutdown` | localhost only | Graceful shutdown (bearer auth exempt) |
+| `/*` | yes (if token set) | Static file serving (if `-b` is set) |
 
-### MySQL config
+When no auth token is configured, all endpoints are open (backwards compatible).
 
-DBSlayer reads MySQL connection parameters from a standard `.cnf` file. Example:
+### Authentication
 
-```ini
-[mysqld1]
-user = readonly
-password = secret
-host = 127.0.0.1
-port = 3306
+When `-k` or `--auth-token` is set, clients must include an `Authorization` header:
+
+```
+GET /db?%7B%22SQL%22:%22SELECT%201%22%7D HTTP/1.1
+Host: localhost:9090
+Authorization: Bearer my-secret-token
 ```
 
-Point dbslayer at it: `dbslayer -c /etc/mysql/dbslayer.cnf -s mysqld1`
+Requests without the header or with an incorrect token receive `401 Unauthorized`.
+
+### TLS
+
+When `--tls-cert` and `--tls-key` are provided, a TLS listener starts on `--tls-port` (default 9443). The plaintext listener on `-p` continues to run, allowing gradual migration.
+
+```
+https://localhost:9443/db?...
+http://localhost:9090/db?...   (still works)
+```
+
+TLS requires building with `--with-openssl`. If OpenSSL is not detected at build time, TLS flags are accepted but print a warning at startup.
 
 ---
 
@@ -194,11 +277,11 @@ Point dbslayer at it: `dbslayer -c /etc/mysql/dbslayer.cnf -s mysqld1`
 
 ### Threat model
 
-DBSlayer is designed as an **internal** service bound to a trusted network. It accepts raw SQL from any client that can reach the port. It does not implement authentication, TLS, or rate limiting. All security controls are expected to come from the surrounding deployment: firewalls, reverse proxies with auth, network ACLs, and least-privilege MySQL grants.
+DBSlayer is designed as an **internal** service. The 2026 security modernization adds optional TLS and bearer authentication, but the core design — raw SQL over HTTP — is unchanged. When deployed without auth or TLS, all security controls must come from the surrounding deployment: firewalls, reverse proxies, network ACLs, and least-privilege MySQL grants.
 
-### What the 2026 hardening fixed
+### 2026 security hardening
 
-17 code-level defects from a Codex Security scan:
+**Phase 1 — Bug fixes (17 defects from Codex Security scan):**
 
 | Fix | What it does |
 |-----|-------------|
@@ -220,15 +303,22 @@ DBSlayer is designed as an **internal** service bound to a trusted network. It a
 | F16 | `apr_size_t` for response lengths (prevent integer overflow) |
 | F17 | Redact password from `ps`/`/stats/args`, disable core dumps |
 
+**Phase 2 — Security modernization:**
+
+| Feature | What it does |
+|---------|-------------|
+| TLS | Optional OpenSSL TLS on separate port (default 9443) |
+| Bearer auth | Optional token-based authentication on all endpoints |
+| Credential cleanup | Removed `-u`/`-x` from CLI — credentials via config file or env vars |
+
 ### Known limitations
 
-- No authentication on any endpoint
-- No TLS (plaintext HTTP only)
 - No rate limiting or request size limits
 - No query cost limits (a `SELECT * FROM huge_table` can exhaust memory)
-- `/shutdown` gated by local IP comparison only (spoofable by local processes)
+- `/shutdown` gated by local IP comparison (spoofable by local processes, but bearer-auth exempt)
 - Password stored in process memory for reconnection (not zeroized after connect)
 - HTTP parser is hand-rolled and does not handle all RFC 7230 edge cases
+- F15 (non-blocking accept handoff) changes threading behavior — load-test before production use
 
 ---
 
@@ -240,7 +330,7 @@ DBSlayer is designed as an **internal** service bound to a trusted network. It a
 python3 test/test_bugfixes.py
 ```
 
-16 tests covering: server startup, type confusion rejection, recursion depth limit, accept resilience, password redaction, log injection, JSON validity, shutdown, and 404 routing.
+20 tests covering: server startup, type confusion rejection, recursion depth limit, accept resilience, password redaction, log injection, JSON validity, shutdown, 404 routing, bearer auth (reject/accept), and TLS HTTPS.
 
 ### Integration tests (require MySQL)
 
@@ -264,25 +354,27 @@ GitHub Actions workflow (`.github/workflows/build-and-test.yml`) builds and runs
 ## Architecture
 
 ```
-                   ┌─────────────────────────────────────────┐
-                   │           dbslayer (single process)       │
-                   │                                          │
-  TCP listen ──────┤  accept thread (poll)                    │
-  :9090             │    ↓ apr_queue_trypush (non-blocking)    │
-                   │                                          │
-                   │  worker threads (N, default 1)            │
-                   │    ↓ decode JSON → mysql_query            │
-                   │    ↓ mysql_store_result → JSON serialize  │
-                   │    ↓ apr_queue_push (out)               │
-                   │                                          │
-                   │  output thread (poll)                     │
-                   │    ↓ apr_socket_send (write responses)    │
-                   └─────────────────────────────────────────┘
+                   ┌──────────────────────────────────────────────┐
+                   │           dbslayer (single process)            │
+                   │                                              │
+  Plaintext :9090 ─┤  accept thread (poll)                        │
+  TLS :9443    ────┤    ↓ apr_queue_trypush (non-blocking)        │
+  (optional)       │                                              │
+                   │  worker threads (N, default 1)                │
+                   │    ↓ decode JSON → mysql_query                │
+                   │    ↓ mysql_store_result → JSON serialize      │
+                   │    ↓ apr_queue_push (out)                     │
+                   │    ↓ bearer token check (if configured)       │
+                   │                                              │
+                   │  output thread (poll)                         │
+                   │    ↓ TLS send / apr_socket_send               │
+                   └──────────────────────────────────────────────┘
 ```
 
 - **APR pools** for memory management (per-connection, per-request)
 - **APR pollset** for non-blocking I/O
 - **APR thread queues** for work distribution
+- **OpenSSL** for optional TLS (separate listener, non-blocking I/O via SSL_read/SSL_write)
 - **Custom JSON parser** (recursive descent, depth-limited at 64)
 - **Custom JSON/XML serializers** (bucket-brigade based)
 - **Skip list** data structure for JSON objects (O(log n) lookup)
@@ -292,19 +384,20 @@ GitHub Actions workflow (`.github/workflows/build-and-test.yml`) builds and runs
 
 ```
 server/dbslayer_server.c     Entry point, arg parsing, service registration
-common/slayer_http_server.c   HTTP server: accept, dispatch, thread pool, response
+common/slayer_http_server.c   HTTP server: accept, dispatch, thread pool, response, auth
 common/slayer_http_parse.c    Hand-rolled HTTP request-line + header parser
-common/simplejson.c           JSON decoder (recursive descent)
-common/serializejson.c       JSON serializer (bucket brigade)
-common/json2xml.c            XML serializer
+common/slayer_tls.c           Optional OpenSSL TLS module (init, accept, recv, send, close)
+common/simplejson.c           JSON decoder (recursive descent, depth-limited)
+common/serializejson.c        JSON serializer (bucket brigade)
+common/json2xml.c             XML serializer
 common/json_skip.c            Skip list (JSON object storage)
 common/urldecode.c            URL percent-decoding
 common/slayer_http_fileserver.c  Static file serving with realpath containment
 common/slayer_server_logging.c   Access/error logging with CRLF sanitization
 common/slayer_server_stats.c     Statistics buckets
 db/dbaccess.c                 MySQL connection management, query execution, result→JSON
-include/                      Header files
-test/                         Python and Ruby tests
+include/                      Header files (slayer_tls.h added)
+test/                         Python (20 tests) and Ruby test suites
 ```
 
 ---
@@ -313,7 +406,7 @@ test/                         Python and Ruby tests
 
 The DBSlayer was written in 2007 by Derek Gottfrid at the New York Times, with assistance from Jacob Harris. Other contributors include Roger Caplan (admin scripts, PHP examples), Tammy Hepps, and Andrzej Lawn (stats AJAX page). Ken Robertson contributed affected-rows and insert-id support.
 
-Originally hosted at dbslayer.org, the source moved to GitHub in 2009. The 2026 maintenance branch added 17 security fixes, native 64-bit BIGINT support, CI, and standalone tests.
+Originally hosted at dbslayer.org, the source moved to GitHub in 2009. The 2026 maintenance branch added 17 security fixes, native 64-bit BIGINT support, optional TLS, bearer authentication, credential cleanup, CI, and standalone tests.
 
 ## License
 
