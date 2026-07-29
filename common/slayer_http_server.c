@@ -463,9 +463,9 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 		apr_pool_destroy(client->mpool);
 		return APR_SUCCESS;
 	}
-	/* bearer token check — skip for /shutdown (has its own local-IP auth) */
-	if (server->auth_token != NULL &&
-	    strcmp(client->request->uri.path, "/shutdown") != 0) {
+	/* /shutdown still performs its local-IP check below; when bearer auth is
+	   configured, it must pass both checks. */
+	if (server->auth_token != NULL) {
 		const char *auth_header =
 			slayer_http_header_get(client->request->parse, "Authorization");
 		if (auth_header == NULL || strncmp(auth_header, "Bearer ", 7) != 0 ||
