@@ -334,7 +334,20 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 	
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"SQL")) !=NULL && sql->type == JSON_STRING) { 
 		if(mysql_query(db,sql->value.string)) { 
-/** NEED TO CHECK FOR BETTER ERROR TO MAKE SURE IT IS A CONNECTION ISSUE **/
+			unsigned int qerrno = mysql_errno(db);
+			/** only a dropped connection may be replayed. anything else - syntax error,
+			    deadlock, constraint violation, permission denial - must be reported as-is:
+			    reconnecting discards the caller's transaction and re-running the statement
+			    on a fresh autocommit session can apply a write twice. **/
+			if(qerrno != CR_SERVER_LOST && qerrno != CR_SERVER_GONE_ERROR
+#ifdef CR_SERVER_LOST_EXTENDED
+			   && qerrno != CR_SERVER_LOST_EXTENDED
+#endif
+			  ) {
+				dbserver_name = dbhandle->dblookup == NULL ? dbhandle->server[dbhandle->server_offset] : dbserver_name;
+				db_report_error(out,mpool,db,dbserver_name,injson);
+				return out;
+			}
 			if(db_handle_reattach(dbhandle,dbserver_name) == NULL || mysql_query((db = dbhandle->dblookup == NULL ? dbhandle->db : json_skip_get(dbhandle->dblookup,(void*)dbserver_name)) ,sql->value.string)){
 
 				dbserver_name = dbhandle->dblookup == NULL ? dbhandle->server[dbhandle->server_offset] : dbserver_name;
