@@ -1,0 +1,36 @@
+name: Build and Test
+
+on:
+  push:
+    branches: ["2026-bugfixes", "main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libapr1-dev libaprutil1-dev libmysqlclient-dev \
+            gcc make autoconf automake
+
+      - name: Configure
+        run: |
+          ./configure \
+            --with-apr-1-config=$(which apr-1-config) \
+            --with-apu-1-config=$(which apu-1-config) \
+            --with-mysql-config=$(which mysql_config)
+
+      - name: Build
+        run: make -j$(nproc) 2>&1 | tee build.log
+        # Fail on compiler errors (warnings from 2007 C code are expected)
+        continue-on-error: false
+
+      - name: Run bugfix tests
+        run: python3 test/test_bugfixes.py
