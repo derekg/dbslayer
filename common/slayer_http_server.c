@@ -124,6 +124,18 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 
 						//setup the socket
 						status = apr_socket_accept(&(connection->conn),conn,connection->mpool);
+						if (status != APR_SUCCESS) {
+							//non-blocking listener: EAGAIN is a normal spurious wakeup, anything
+							//else is worth a log line. either way there is no connection to track.
+							if (!APR_STATUS_IS_EAGAIN(status)) {
+								char ebuf[256];
+								slayer_server_log_message(server->elmanager,
+									apr_pstrcat(cmpool,"ERROR in apr_socket_accept - ",
+									            apr_strerror(status,ebuf,sizeof(ebuf)),"\n",NULL));
+							}
+							apr_pool_destroy(cmpool);
+							continue;
+						}
 						status = apr_socket_opt_set(connection->conn,APR_SO_NONBLOCK,1);
 						memset(&connection->pollfd,0,sizeof(apr_pollfd_t));
 
