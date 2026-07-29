@@ -703,7 +703,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	threads = apr_array_make(server.mpool,server.thread_count,sizeof(apr_thread_t*));
 	apr_threadattr_create(&thread_attr,server.mpool);
 	apr_threadattr_detach_set(thread_attr,0); // don't detach
-	apr_threadattr_stacksize_set(thread_attr,4096*10);
+	apr_threadattr_stacksize_set(thread_attr,4096*32);
 
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {
