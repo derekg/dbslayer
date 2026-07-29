@@ -6,10 +6,11 @@
 static void db_report_error(json_value *out, apr_pool_t *mpool, MYSQL *db,
                             const char *dbserver_name, json_value *injson) {
 	json_value *rb = NULL;
+	const char *error_message = mysql_error(db);
 	if(json_skip_get(out->value.object,"MYSQL_ERROR") != NULL) return;
 
 	json_object_add(out,"SUCCESS",json_boolean_create(mpool,0));
-	json_object_add(out,"MYSQL_ERROR",json_string_create(mpool,mysql_error(db)));
+	json_object_add(out,"MYSQL_ERROR",error_message ? json_string_create(mpool,error_message) : json_null_create(mpool));
 	json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,mysql_errno(db)));
 	if(json_skip_get(out->value.object,"SERVER") == NULL) {
 		json_object_add(out,"SERVER",json_string_create(mpool,dbserver_name));
@@ -408,13 +409,15 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 		}
 	} 
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"STAT")) !=NULL && sql->type == JSON_BOOLEAN && sql->value.boolean) { 
-		json_object_add(out,"STAT",json_string_create(mpool,mysql_stat(db)));
+		const char *stat = mysql_stat(db);
+		json_object_add(out,"STAT",stat ? json_string_create(mpool,stat) : json_null_create(mpool));
 	}
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"CLIENT_INFO")) !=NULL && sql->type == JSON_BOOLEAN && sql->value.boolean) { 
 		json_object_add(out,"CLIENT_INFO",json_string_create(mpool,mysql_get_client_info()));
 	}
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"HOST_INFO")) !=NULL && sql->type == JSON_BOOLEAN && sql->value.boolean) { 
-		json_object_add(out,"HOST_INFO",json_string_create(mpool,mysql_get_host_info(db)));
+		const char *host_info = mysql_get_host_info(db);
+		json_object_add(out,"HOST_INFO",host_info ? json_string_create(mpool,host_info) : json_null_create(mpool));
 	}
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"SERVER_VERSION")) !=NULL && sql->type == JSON_BOOLEAN && sql->value.boolean) { 
 		json_object_add(out,"SERVER_VERSION",json_long_create(mpool,mysql_get_server_version(db)));
