@@ -6,17 +6,27 @@
 
 /* $Id: urldecode.c,v 1.2 2007/05/09 20:55:00 derek Exp $ */
 
+static int hexval(unsigned char c) {
+	if (isdigit(c)) return c - '0';
+	if (isxdigit(c)) return tolower(c) - 'a' + 10;
+	return -1;
+}
+
 char * urldecode(apr_pool_t *mpool, char *in) { 
-		int i;
 		char *out,*rout; 
 
 		out = rout = apr_pcalloc(mpool, strlen(in ? in: "" )+1 /* * sizeof(char)*/);
 		while(in != NULL && *in !='\0') { 
 			if(*in == '%' && *(in+1) !='\0' && *(in+2)!='\0' ) { 
-					for(i=0, in++ ; i < 2; i++,in++) {
-						(*out) += ((isdigit(*in) ?  *in - '0' : ((tolower(*in) - 'a')) + 10) *  ( i ? 1 : 16));
+					int hi = hexval((unsigned char)*(in+1));
+					int lo = hexval((unsigned char)*(in+2));
+					if (hi >= 0 && lo >= 0) {
+						*out++ = (char)((hi << 4) | lo);
+						in += 3;
+					} else {
+						//not a valid %XX escape - pass the '%' through literally
+						*out++ = *in++;
 					}
-					out++;
 			} else if (*in == '+') {
 				*out++ = ' ';
 				in++;

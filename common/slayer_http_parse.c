@@ -211,9 +211,10 @@ REQUEST_LINE_FINISHED:
 }
 
 int check_header(char x) {
-	if (tolower(x) >= 'a' && tolower(x) <= 'z') return 1;
-	if (x == '_' || x == '-' || x == '.') return 1;
-	if (isdigit(x)) return 1;
+	unsigned char c = (unsigned char)x;
+	if (tolower(c) >= 'a' && tolower(c) <= 'z') return 1;
+	if (c == '_' || c == '-' || c == '.') return 1;
+	if (isdigit(c)) return 1;
 	return 0;
 }
 
