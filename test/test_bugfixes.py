@@ -13,8 +13,10 @@ Run:
 """
 import http.client
 import json
+import ssl
 import subprocess
 import socket
+import tempfile
 import time
 import os
 import signal
@@ -23,6 +25,7 @@ import urllib.parse
 
 HOST = "127.0.0.1"
 PORT = 19099
+TLS_PORT = 19100
 BINARY = os.path.join(os.path.dirname(__file__), "..", "server", "dbslayer")
 CONFIG = os.path.join(os.path.dirname(__file__), "test-my.cnf")  # minimal config — no MySQL needed for non-DB tests
 
@@ -32,11 +35,16 @@ class DBSlayerTest:
         self.passed = 0
         self.failed = 0
         self.failures = []
+        self.skipped = 0
 
-    def start(self):
+    def start(self, extra_args=None):
         """Start dbslayer on a test port."""
+        args = [BINARY, "-s", "localhost", "-c", CONFIG, "-p", str(PORT),
+                "-d", "1"]
+        if extra_args:
+            args.extend(extra_args)
         self.proc = subprocess.Popen(
-            [BINARY, "-s", "localhost", "-c", CONFIG, "-p", str(PORT)],
+            args,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -47,6 +55,8 @@ class DBSlayerTest:
                 s.close()
                 return True
             except (ConnectionRefusedError, OSError):
+                if self.proc.poll() is not None:
+                    return False
                 time.sleep(0.1)
         return False
 
@@ -59,9 +69,24 @@ class DBSlayerTest:
                 self.proc.kill()
             self.proc = None
 
-    def http_get(self, path):
+    def http_get(self, path, headers=None):
         """Make an HTTP GET request, return (status_code, body_text)."""
         conn = http.client.HTTPConnection(HOST, PORT, timeout=5)
+        try:
+            conn.request("GET", path, headers=headers or {})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body
+        except Exception as e:
+            return -1, str(e)
+        finally:
+            conn.close()
+
+    def https_get(self, path):
+        """Make an HTTPS GET request with test-certificate verification off."""
+        context = ssl._create_unverified_context()
+        conn = http.client.HTTPSConnection(HOST, TLS_PORT, timeout=5,
+                                           context=context)
         try:
             conn.request("GET", path)
             resp = conn.getresponse()
@@ -71,6 +96,10 @@ class DBSlayerTest:
             return -1, str(e)
         finally:
             conn.close()
+
+    def skip(self, name, detail):
+        self.skipped += 1
+        print(f"  - {name} — skipped: {detail}")
 
     def http_get_raw(self, path_bytes):
         """Send a raw HTTP request with a non-standard path to test parser edge cases."""
@@ -227,8 +256,74 @@ class DBSlayerTest:
         self.assert_true("unknown path returns 404", status == 404,
                          f"got status {status}")
 
+    def test_bearer_auth(self):
+        """S9: bearer auth rejects missing/wrong tokens and accepts the right one."""
+        status, body = self.http_get("/db?true")
+        self.assert_true("S9 auth: /db without bearer token returns 401",
+                         status == 401,
+                         f"got status {status}, body: {body[:200]}")
+
+        status, body = self.http_get(
+            "/db?true", headers={"Authorization": "Bearer wrong-token"})
+        self.assert_true("S9 auth: wrong bearer token returns 401",
+                         status == 401,
+                         f"got status {status}, body: {body[:200]}")
+
+        status, body = self.http_get(
+            "/db?true",
+            headers={"authorization": "Bearer dbslayer-test-token"})
+        self.assert_true("S9 auth: correct bearer token reaches /db",
+                         status == 200,
+                         f"got status {status}, body: {body[:200]}")
+
+    def test_tls(self):
+        """S9: TLS listener serves a basic HTTPS request when OpenSSL is enabled."""
+        makefile = os.path.join(os.path.dirname(__file__), "..", "common",
+                                "Makefile")
+        try:
+            with open(makefile, encoding="utf-8") as f:
+                openssl_enabled = any(
+                    line.startswith("OPENSSL_LIBS =") and
+                    line.partition("=")[2].strip()
+                    for line in f
+                )
+        except OSError:
+            openssl_enabled = False
+        if not openssl_enabled:
+            self.skip("S9 TLS: HTTPS /stats returns 200",
+                      "build was configured without OpenSSL")
+            return
+
+        with tempfile.TemporaryDirectory(prefix="dbslayer-tls-") as tempdir:
+            cert = os.path.join(tempdir, "cert.pem")
+            key = os.path.join(tempdir, "key.pem")
+            try:
+                subprocess.run(
+                    ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                     "-keyout", key, "-out", cert, "-days", "1", "-nodes",
+                     "-subj", "/CN=localhost"],
+                    check=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                self.assert_true("S9 TLS: generate test certificate", False,
+                                 str(e))
+                return
+
+            if not self.start(["--tls-cert", cert, "--tls-key", key,
+                               "--tls-port", str(TLS_PORT)]):
+                self.assert_true("S9 TLS: server starts TLS listener", False)
+                return
+            try:
+                status, body = self.https_get("/stats")
+                self.assert_true("S9 TLS: HTTPS /stats returns 200",
+                                 status == 200,
+                                 f"got status {status}, body: {body[:200]}")
+            finally:
+                self.stop()
+
     def run_all(self):
-        tests = [
+        baseline_tests = [
             self.test_server_starts,
             self.test_f1_dispatch_status_initialized,
             self.test_f8_non_object_json_root,
@@ -240,8 +335,26 @@ class DBSlayerTest:
             self.test_404_for_unknown_path,
             self.test_shutdown_local,  # must be last — kills server
         ]
-        for test in tests:
+        if not self.start():
+            self.assert_true("backwards-compatible plaintext server starts",
+                             False)
+            return False
+        print(f"Plaintext server started on {HOST}:{PORT}\n")
+        for test in baseline_tests:
             test()
+        self.stop()
+
+        print("\nBearer authentication")
+        if not self.start(["--auth-token", "dbslayer-test-token"]):
+            self.assert_true("S9 auth: protected server starts", False)
+        else:
+            try:
+                self.test_bearer_auth()
+            finally:
+                self.stop()
+
+        print("\nTLS")
+        self.test_tls()
         return self.failed == 0
 
 def main():
@@ -256,16 +369,13 @@ def main():
 
     runner = DBSlayerTest()
     try:
-        if not runner.start():
-            print("ERROR: Could not start dbslayer server")
-            sys.exit(1)
-        print(f"Server started on {HOST}:{PORT}\n")
         success = runner.run_all()
     finally:
         runner.stop()
 
     print(f"\n{'=' * 60}")
-    print(f"Results: {runner.passed} passed, {runner.failed} failed")
+    print(f"Results: {runner.passed} passed, {runner.failed} failed, "
+          f"{runner.skipped} skipped")
     if runner.failures:
         print("\nFailures:")
         for name, detail in runner.failures:
