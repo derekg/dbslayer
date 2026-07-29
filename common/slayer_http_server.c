@@ -20,6 +20,8 @@ typedef struct _slayer_listener_config_t {
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
 
+#define MAX_CONNECTIONS_PER_IP 50
+
 static int slayer_auth_token_matches(const char *provided,
                                      const char *expected) {
 	apr_size_t provided_len = strlen(provided);
@@ -43,11 +45,54 @@ static int slayer_auth_token_matches(const char *provided,
 
 static apr_status_t slayer_http_connection_close(
 		slayer_http_connection_t *connection) {
+	apr_status_t status = APR_SUCCESS;
+
+	if (connection->connection_counted) {
+		int *count;
+		apr_thread_mutex_lock(connection->server->connection_counts_mutex);
+		count = apr_hash_get(connection->server->connection_counts,
+		                     connection->remote_ip, APR_HASH_KEY_STRING);
+		if (count != NULL) {
+			(*count)--;
+			if (*count == 0) {
+				apr_hash_set(connection->server->connection_counts,
+				             connection->remote_ip, APR_HASH_KEY_STRING,
+				             NULL);
+			}
+		}
+		connection->connection_counted = 0;
+		apr_thread_mutex_unlock(connection->server->connection_counts_mutex);
+	}
 	if (connection->tls != NULL) {
 		slayer_tls_close(connection->tls);
 		connection->tls = NULL;
 	}
-	return apr_socket_close(connection->conn);
+	if (connection->conn != NULL) {
+		status = apr_socket_close(connection->conn);
+		connection->conn = NULL;
+	}
+	return status;
+}
+
+static int slayer_http_connection_count_increment(
+		slayer_http_connection_t *connection) {
+	int *count;
+	int current;
+	slayer_http_server_t *server = connection->server;
+
+	apr_thread_mutex_lock(server->connection_counts_mutex);
+	count = apr_hash_get(server->connection_counts, connection->remote_ip,
+	                     APR_HASH_KEY_STRING);
+	if (count == NULL) {
+		char *key = apr_pstrdup(server->mpool, connection->remote_ip);
+		count = apr_pcalloc(server->mpool, sizeof(int));
+		apr_hash_set(server->connection_counts, key, APR_HASH_KEY_STRING,
+		             count);
+	}
+	current = ++(*count);
+	connection->connection_counted = 1;
+	apr_thread_mutex_unlock(server->connection_counts_mutex);
+	return current;
 }
 
 static char * slayer_http_response_code_lookup(int code) {
@@ -192,6 +237,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 						apr_pool_create(&cmpool,NULL);
 						connection = apr_pcalloc(cmpool,sizeof(slayer_http_connection_t));
 						connection->mpool = cmpool;
+						connection->server = server;
 						apr_pool_create(&rmpool,connection->mpool);
 						connection->request = apr_pcalloc(rmpool,sizeof(slayer_http_request_t));
 						connection->request->mpool = rmpool;
@@ -211,6 +257,25 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							}
 							apr_pool_destroy(cmpool);
 							continue;
+						}
+						{
+							apr_sockaddr_t *remote_addr;
+							char *remote_ip;
+							if (apr_socket_addr_get(&remote_addr, APR_REMOTE,
+							                        connection->conn) != APR_SUCCESS ||
+							    apr_sockaddr_ip_get(&remote_ip, remote_addr) != APR_SUCCESS) {
+								slayer_http_connection_close(connection);
+								apr_pool_destroy(cmpool);
+								continue;
+							}
+							connection->remote_ip =
+								apr_pstrdup(connection->mpool, remote_ip);
+							if (slayer_http_connection_count_increment(connection) >
+							    MAX_CONNECTIONS_PER_IP) {
+								slayer_http_connection_close(connection);
+								apr_pool_destroy(cmpool);
+								continue;
+							}
 						}
 						if (tls_ctx != NULL) {
 							apr_socket_timeout_set(connection->conn,
@@ -673,6 +738,9 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	status = apr_initialize();
 	status = apr_pool_create(&(server.mpool),NULL);
 	slayer_server_parse_args(argc,argv,&server);
+	server.connection_counts = apr_hash_make(server.mpool);
+	apr_thread_mutex_create(&server.connection_counts_mutex,
+	                        APR_THREAD_MUTEX_DEFAULT, server.mpool);
 
 	server.thread_count++;
 
