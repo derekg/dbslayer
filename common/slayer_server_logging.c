@@ -1,5 +1,21 @@
 #include "slayer_server_logging.h"
 
+/** log fields carry raw request bytes and mysql_error() text - neither may be allowed to
+    forge line structure in the access log **/
+static const char * slayer_log_sanitize(apr_pool_t *mpool, const char *in) {
+	apr_size_t i, len;
+	char *out;
+	if (in == NULL) return "";
+	len = strlen(in);
+	out = apr_palloc(mpool, len + 1);
+	for (i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)in[i];
+		out[i] = (c < 0x20 || c == 0x7f) ? '_' : (char)c;
+	}
+	out[len] = '\0';
+	return out;
+}
+
 /* $Id: slayer_server_logging.c,v 1.1 2008/02/29 00:18:52 derek Exp $ */
 
 int slayer_server_log_open(slayer_server_log_manager_t **_manager,const char *filename, int nentries, apr_pool_t *mpool) {
@@ -54,6 +70,7 @@ int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *
 	apr_int64_t current_time = apr_time_now();
 	apr_size_t result_size;
 	apr_time_exp_t ltime;
+	request_line = slayer_log_sanitize(mpool,request_line);
 	apr_time_exp_lt(&ltime,current_time);
 	apr_strftime (dstring, &result_size, sizeof(dstring), "%d/%b/%Y:%H:%M:%S %z", &ltime );
 
@@ -77,6 +94,8 @@ int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_
 	apr_size_t result_size;
 	apr_int64_t current_time = apr_time_now();
 	apr_time_exp_t ltime;
+	request_line  = slayer_log_sanitize(mpool,request_line);
+	error_message = slayer_log_sanitize(mpool,error_message);
 	apr_time_exp_lt(&ltime,current_time);
 	apr_strftime (dstring, &result_size, sizeof(dstring), "%d/%b/%Y:%H:%M:%S %z", &ltime );
 
