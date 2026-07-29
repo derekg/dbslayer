@@ -10,6 +10,12 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+/*
+ * Thread ownership: SSL_CTX is fully configured during initialization and then
+ * shared read-only. Each SSL belongs to one connection; ownership moves with
+ * that connection between stages and the SSL is never shared concurrently
+ * across threads or between connections.
+ */
 struct slayer_tls_ctx {
 	SSL_CTX *ctx;
 };
