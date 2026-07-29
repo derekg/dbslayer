@@ -265,6 +265,10 @@ int slayer_http_request_header_parse( slayer_http_request_parse_t *parse) {
 	char *p = NULL;
 	state = parse->header_state;
 	for (p = parse->buffer_marker; p < (parse->buffer + parse->buffer_size);p++) {
+		parse->header_bytes_read++;
+		if (parse->header_bytes_read > MAX_HEADER_BYTES) {
+			return INVALID_HTTP_REQUEST;
+		}
 		switch (state) {
 		case PARSE_HEADER_START:
 			switch (*p) {

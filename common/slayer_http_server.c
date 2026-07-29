@@ -75,6 +75,9 @@ static int request_parse(slayer_http_connection_t *connection) {
 	slayer_http_request_parse_t *http_request = connection->request->parse;
 
 	if (http_request->buffer_marker == NULL || http_request->buffer_marker >= http_request->buffer+http_request->buffer_size) {
+		if (http_request->request_state != PARSE_REQUEST_DONE) {
+			http_request->header_bytes_read = 0;
+		}
 		if (connection->tls != NULL) {
 			int received = slayer_tls_recv(connection->tls,
 			                              http_request->buffer,

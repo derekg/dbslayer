@@ -4,6 +4,7 @@
 #include <apr_general.h>
 
 #define INVALID_HTTP_REQUEST -1
+#define MAX_HEADER_BYTES 32768
 
 typedef struct _slayer_http_header_t {
 	char *name;
@@ -63,6 +64,7 @@ typedef struct _slayer_http_request_parse_t {
 	apr_size_t header_name_size;
 	char *header_value;
 	apr_size_t header_value_size;
+	int header_bytes_read;
 } slayer_http_request_parse_t;
 
 int slayer_http_request_parse_init(apr_pool_t *mpool, slayer_http_request_parse_t **parse, int uri_size);
