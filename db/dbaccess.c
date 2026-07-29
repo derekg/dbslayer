@@ -34,6 +34,7 @@ db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) 
 		for(ct = handle->server_offset ; ct < handle->server_count; ct++) { 
 			if(handle->db) mysql_close(handle->db);
 			handle->db = mysql_init(NULL);
+			if(handle->db == NULL) continue;
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_FILE,handle->config);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_GROUP,handle->server[ct]);
 			if(mysql_real_connect(handle->db,NULL,handle->user,handle->pass,NULL,0,NULL,CLIENT_MULTI_STATEMENTS) != NULL){
@@ -44,6 +45,7 @@ db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) 
 		for(ct = 0; ct < handle->server_offset; ct++) { 
 			if(handle->db) mysql_close(handle->db);
 			handle->db = mysql_init(NULL);
+			if(handle->db == NULL) continue;
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_FILE,handle->config);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_GROUP,handle->server[ct]);
 			if(mysql_real_connect(handle->db,NULL,handle->user,handle->pass,NULL,0,NULL,CLIENT_MULTI_STATEMENTS) != NULL){
@@ -55,6 +57,10 @@ db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) 
 		MYSQL *db = json_skip_get(handle->dblookup,(void*) dbserver_name);
 		if(db) { mysql_close(db); } 
 		db = mysql_init(NULL);
+		if(db == NULL) {
+			json_skip_replace(handle->dblookup,(void*)dbserver_name,NULL);
+			return NULL;
+		}
 		mysql_options(db,MYSQL_READ_DEFAULT_FILE,handle->config);
 		mysql_options(db,MYSQL_READ_DEFAULT_GROUP,dbserver_name);
 		json_skip_replace(handle->dblookup,(void*)dbserver_name,db);
@@ -108,10 +114,11 @@ db_handle_t * db_handle_init(const char *_user, const char *_pass, const char *_
 void db_handle_destroy(db_handle_t *dbhandle) {
 	int i; 
 	if(dbhandle->dblookup == NULL) { 
-		mysql_close(dbhandle->db);
+		if(dbhandle->db) mysql_close(dbhandle->db);
 	} else { 
 		for(i = 0; i < dbhandle->server_count; i++) { 
-			mysql_close((MYSQL*)json_skip_get(dbhandle->dblookup,dbhandle->server[i]));
+			MYSQL *db = (MYSQL*)json_skip_get(dbhandle->dblookup,dbhandle->server[i]);
+			if(db) mysql_close(db);
 		}	
 		apr_pool_destroy(dbhandle->mpool);
 	}
@@ -133,11 +140,15 @@ json_value * dbresult2json(MYSQL_RES * myresult,apr_pool_t *mpool) {
 		unsigned int i;
 		MYSQL_FIELD *fields;
 		num_fields = mysql_num_fields(myresult);
-		fields = mysql_fetch_fields(myresult);
 		json_value *header = json_array_create(mpool,num_fields);
 		json_object_add(result,"HEADER",header);
 		json_value *coltypes = json_array_create(mpool,num_fields);
 		json_object_add(result,"TYPES",coltypes);
+		json_value *rows  = json_array_create(mpool,1000);
+		json_object_add(result,"ROWS",rows);
+		if(num_fields == 0) return result;
+		fields = mysql_fetch_fields(myresult);
+		if(fields == NULL) return result;
 		for(i = 0; i < num_fields; i++) {
 			json_array_append(header,json_string_create(mpool,fields[i].name));
 			switch(fields[i].type) {
@@ -222,8 +233,6 @@ json_value * dbresult2json(MYSQL_RES * myresult,apr_pool_t *mpool) {
 							json_array_append(coltypes,json_string_create(mpool,"MYSQL_TYPE_UNKNOWN")); break;
 					}
 		}
-		json_value *rows  = json_array_create(mpool,1000);
-		json_object_add(result,"ROWS",rows);
 		MYSQL_ROW myrow; 
 		while( (myrow = mysql_fetch_row(myresult)) !=NULL) { 
 			json_value *orow = json_array_create(mpool,num_fields);
@@ -328,6 +337,11 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 	} else { 
 		db = dbhandle->db;
 		dbserver_name = dbhandle->server[dbhandle->server_offset];
+	}
+	if(db == NULL) {
+		json_object_add(out,"ERROR",json_string_create(mpool,"Could not initialize the database handle"));
+		db_report_error(out,mpool,db,dbserver_name,injson);
+		return out;
 	}
 	
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"SQL")) !=NULL && sql->type == JSON_STRING) { 
