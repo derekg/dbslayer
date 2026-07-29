@@ -7,6 +7,7 @@
 | Apache Portable Runtime (APR) | 1.2+ | `libapr1-dev` |
 | APR-util | 1.2+ | `libaprutil1-dev` |
 | MySQL client libraries | 5.0+ | `libmysqlclient-dev` |
+| OpenSSL (optional, for TLS) | 1.1+ | `libssl-dev` |
 | GCC | C99+ | `gcc` |
 | GNU Make | 3.81+ | `make` |
 
@@ -14,6 +15,14 @@
 
 ```bash
 ./configure
+make
+sudo make install
+```
+
+With TLS support:
+
+```bash
+./configure --with-openssl
 make
 sudo make install
 ```
