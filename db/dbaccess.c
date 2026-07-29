@@ -1,23 +1,25 @@
 #include "dbaccess.h"
 /* $Id: dbaccess.c,v 1.14 2008/03/06 01:50:58 derek Exp $ */
 
-/** all three error paths in dbexecute report the same shape - and json_skip_put appends
+/** all error paths in dbexecute report the same shape - and json_skip_put appends
     rather than replaces, so adding a key twice emits a duplicate in the JSON. add once. **/
 static void db_report_error(json_value *out, apr_pool_t *mpool, MYSQL *db,
                             const char *dbserver_name, json_value *injson) {
 	json_value *rb = NULL;
-	const char *error_message = mysql_error(db);
+	const char *error_message;
 	if(json_skip_get(out->value.object,"MYSQL_ERROR") != NULL) return;
+	error_message = db ? mysql_error(db) : NULL;
 
 	json_object_add(out,"SUCCESS",json_boolean_create(mpool,0));
 	json_object_add(out,"MYSQL_ERROR",error_message ? json_string_create(mpool,error_message) : json_null_create(mpool));
-	json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,mysql_errno(db)));
+	json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,db ? mysql_errno(db) : 0));
 	if(json_skip_get(out->value.object,"SERVER") == NULL) {
-		json_object_add(out,"SERVER",json_string_create(mpool,dbserver_name));
+		json_object_add(out,"SERVER",dbserver_name ? json_string_create(mpool,dbserver_name) : json_null_create(mpool));
 	}
 
 	/** issue a rollback if caller asked for it **/
-	if ((injson->type == JSON_OBJECT)
+	if (db
+	      && (injson->type == JSON_OBJECT)
 	      && ((rb = (json_value*)json_skip_get(injson->value.object,"ROLLBACK_ON_ERROR")) != NULL)
 	      && (rb->type == JSON_BOOLEAN)
 	      && rb->value.boolean) {
@@ -305,6 +307,9 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 	if(injson->type == JSON_OBJECT && (request_server = (json_value*)json_skip_get(injson->value.object,"SERVER")) !=NULL && request_server->type == JSON_STRING) {
 		if(dbhandle->dblookup == NULL)  { 
 			json_object_add(out,"ERROR",json_string_create(mpool,"Provided a SERVER argument but dbslayer is not configure for named server access - perhaps you want the -m config option"));
+			db = dbhandle->db;
+			dbserver_name = dbhandle->server[dbhandle->server_offset];
+			db_report_error(out,mpool,db,dbserver_name,injson);
 			return out;
 		}
 		dbserver_name = request_server->value.string;
@@ -312,11 +317,13 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 		if(db == NULL) { 
 			json_object_add(out,"ERROR",json_string_create(mpool,"Couldn't find the database handle for SERVER requested"));
 			json_object_add(out,"SERVER",request_server);
+			db_report_error(out,mpool,db,dbserver_name,injson);
 			return out;
 		}
 		
 	} else if(dbhandle->dblookup !=NULL) { 
 		json_object_add(out,"ERROR",json_string_create(mpool,"dbslayer is configured to take a SERVER argument - perhaps you want the -s config option"));
+		db_report_error(out,mpool,db,dbserver_name,injson);
 		return out;
 	} else { 
 		db = dbhandle->db;
@@ -446,6 +453,7 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 	}
 	if(out->type == JSON_OBJECT && out->value.object->node_count == 0) { 
 		json_object_add(out,"ERROR",json_string_create(mpool,"TRY {\"SLAYER_HELP\":true } "));
+		db_report_error(out,mpool,db,dbserver_name,injson);
 	}
 	return out;
 }
