@@ -104,7 +104,13 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 			status = apr_pollset_poll(pollset, server->socket_timeout , &events, &ret_pfd);
 			if (apr_atomic_read32(&(server->shutdown))) return 0;
 			//update_alsotry(td_shared->alsotry,td_shared->config); -- NOT SURE WHAT TO ABOUT THIS ONE -  TODO: add additional function
-		} while (status == APR_TIMEUP);
+		} while (status == APR_TIMEUP && connections_count == 0);
+		if (status == APR_TIMEUP) {
+			//nothing readable, but connections are open: fall through to the sweep so
+			//timeouts are reaped and deferred handoffs are retried
+			events = 0;
+			status = APR_SUCCESS;
+		}
 		if (status == APR_SUCCESS) {
 			int i;
 			for ( i = 0; i < events; i++) {
@@ -176,9 +182,31 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 			for (i = 0; i < sizeof(connections) /sizeof(slayer_http_connection_t*); i++) {
 				if (connections[i] != NULL  && connections[i]->request != NULL) {
 					if (connections[i]->request->read_done) {
-						apr_pollset_remove(pollset,&(connections[i]->pollfd));
-						while ((status == apr_queue_push(server->in_queue,connections[i])) == APR_EINTR);
+						if (!connections[i]->request->handoff_pending) {
+							apr_pollset_remove(pollset,&(connections[i]->pollfd));
+							connections[i]->request->handoff_pending = 1;
+						}
+						while ((status = apr_queue_trypush(server->in_queue,connections[i])) == APR_EINTR);
 						if (status == APR_EOF) return 0;
+						if (status == APR_EAGAIN) {
+							/** every worker is busy. do NOT block here - this thread is also the
+							    accept loop, the read loop and the timeout reaper for every other
+							    connection. leave this one parked and retry on the next pass. **/
+							if (apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {
+								apr_socket_close(connections[i]->conn);
+								apr_pool_destroy(connections[i]->mpool);
+								connections[i] = NULL;
+								connections_count--;
+							}
+							continue;
+						}
+						if (status != APR_SUCCESS) {
+							apr_socket_close(connections[i]->conn);
+							apr_pool_destroy(connections[i]->mpool);
+							connections[i] = NULL;
+							connections_count--;
+							continue;
+						}
 						connections[i] = NULL;
 						connections_count--;
 					} else if (connections[i]->request->done || apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {

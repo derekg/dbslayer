@@ -61,6 +61,7 @@ typedef struct _slayer_http_request_t {
 	int payload_size;
 	int response_code;
 	int read_done;
+	int handoff_pending;   //removed from the pollset, waiting for a slot on in_queue
 	int done;
 } slayer_http_request_t;
 
