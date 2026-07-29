@@ -28,7 +28,13 @@ void * db_global_init(apr_pool_t *pmpool, int argc, char **argv) {
 				case 's': config->server = apr_pstrdup(pmpool,argv[i+1]); break;
 				case 'c': config->configure = apr_pstrdup(pmpool,argv[i+1]); break;
 				case 'u': config->username = apr_pstrdup(pmpool,argv[i+1]); break;
-				case 'x': config->password = apr_pstrdup(pmpool,argv[i+1]); break;
+				case 'x':
+					config->password = apr_pstrdup(pmpool,argv[i+1]);
+					//overwrite the argv slot in place so the password disappears from
+					///proc/<pid>/cmdline, from ps, and from the /stats/args response that
+					//slayer_server_run builds a few lines after this function returns
+					memset(argv[i+1],'x',strlen(argv[i+1]));
+					break;
 				case 'm': config->multiserver= apr_pstrdup(pmpool,argv[i+1]); break;
 			}			
 		}
@@ -81,10 +87,10 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					stmt = decode_json(cquery,strlen(cquery),client->request->mpool); 
 	}
 
-	if(dbhandle && stmt) {
+	if(dbhandle && stmt && stmt->type == JSON_OBJECT) {
 					output_format =  json_skip_get(stmt->value.object,"FORMAT");
 					json_value *result = dbexecute(dbhandle,stmt,client->request->mpool);
-					json_value *errors = json_skip_get(result->value.object,"MYSQL_ERROR");	
+					json_value *errors = result->type == JSON_OBJECT ? json_skip_get(result->value.object,"MYSQL_ERROR") : NULL;
 					if(errors) { 
 									char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
 									slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,apr_pstrcat(client->request->mpool,"ERROR: ",errors->value.string,NULL));
@@ -97,7 +103,12 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					}
 	} else  {
 					char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
-					slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: Couldn't parse incoming JSON");
+					if(stmt && stmt->type != JSON_OBJECT) {
+						output = "{\"ERROR\" : \"the top level JSON value must be an object\"}";
+						slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: incoming JSON root was not an object");
+					} else {
+						slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: Couldn't parse incoming JSON");
+					}
 	}
 
 	client->request->response_code = 200;

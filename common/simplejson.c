@@ -44,7 +44,7 @@ json_value* decode_json_array(json_string *injson) {
 	*/
 
 	injson->offset++; // toss of the leading [
-	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 	if(injson->offset >= injson->end) return NULL;
 	if(*(injson->offset) == ']') {
 		injson->offset++;
@@ -60,7 +60,7 @@ json_value* decode_json_array(json_string *injson) {
 	//*((json_value**)(apr_array_push(out->value.array))) = element;
 	
 	while( injson->offset < injson->end && *(injson->offset)!=']') { 
-		while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+		while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 		if(injson->offset >= injson->end) return NULL;
 		switch(*(injson->offset)) { 
 			case ']':
@@ -110,7 +110,8 @@ json_value* decode_json_object(json_string *injson){
 	out->type = JSON_OBJECT;
 
 	injson->offset++; // toss of the leading  {
-	while(isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
+	if(injson->offset >= injson->end) return NULL;
 	//empty { }
 	if(*(injson->offset) == '}') {
 		injson->offset++;
@@ -118,32 +119,32 @@ json_value* decode_json_object(json_string *injson){
 	}
 
 	//PULL OUT THE FIRST VALUE
-	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 	if(injson->offset >= injson->end || *(injson->offset) != '"') return NULL;
 	json_value *name = decode_json_string(injson);
 	if(name == NULL) return NULL;
-	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 	if(injson->offset >= injson->end || *(injson->offset) != ':') return NULL;
 	injson->offset++; //eat the :
-	while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+	while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 	json_value *value = decode_json_value(injson);
 	if(value == NULL) return NULL;
 	json_skip_put(out->value.object,name->value.string,value);
 
 	while( injson->offset < injson->end && *(injson->offset) != '}') { 
-		while( injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+		while( injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 		if(injson->offset < injson->end && *(injson->offset) == '}')  {
 			goto object_closure;
 		} else if (injson->offset < injson->end &&*(injson->offset) == ',') { 
 			injson->offset++; // eat the comma
-			while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+			while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 			if(injson->offset >= injson->end || *(injson->offset) != '"') return NULL;
 			json_value *name = decode_json_string(injson);
 			if(name == NULL) return NULL;
-			while(injson->offset < injson->end &&isspace(*injson->offset)) injson->offset++;
+			while(injson->offset < injson->end &&isspace((unsigned char)*injson->offset)) injson->offset++;
 			if(injson->offset >= injson->end ||*(injson->offset) != ':') return NULL;
 			injson->offset++;
-			while(injson->offset < injson->end && isspace(*injson->offset)) injson->offset++;
+			while(injson->offset < injson->end && isspace((unsigned char)*injson->offset)) injson->offset++;
 			json_value *value = decode_json_value(injson);
 			if(value == NULL) return NULL;
 			json_skip_put(out->value.object,name->value.string,value);
@@ -165,6 +166,7 @@ json_value* decode_json_string(json_string *injson) {
 	while( ptr< injson->end && *ptr !='"') { 
 			if(*ptr == '\\') { 
 							ptr++;
+							if(ptr >= injson->end) return NULL;
 							switch(*ptr) { 
 								case 'u':  
 								case '\\':
@@ -271,7 +273,7 @@ json_value* decode_json_number(json_string *injson){
 	const char *pptr = injson->offset;
 	char isfloat = 0;
 	while( pptr != NULL && pptr < injson->end) {  
-		if(isdigit(*pptr) || (*pptr == '-' && pptr == injson->offset)) { 
+		if(isdigit((unsigned char)*pptr) || (*pptr == '-' && pptr == injson->offset)) {
 			pptr++;
 		}else { 
 			switch(*pptr) {
@@ -318,11 +320,18 @@ json_value * decode_json_null(json_string *injson) {
 json_value * decode_json_value(json_string *injson) { 
 	json_value *outjson= NULL;	
 	if(injson->jstring ) {
-		while(isspace(*(injson->offset)))  injson->offset++;
+		while(injson->offset < injson->end && isspace((unsigned char)*(injson->offset)))  injson->offset++;
+		if(injson->offset >= injson->end) return NULL;
 		switch(*(injson->offset)) { 
 						case '"':  outjson = decode_json_string(injson); break;
-						case '[':  outjson = decode_json_array(injson); break;
-						case '{':  outjson = decode_json_object(injson); break;
+						case '[':
+						case '{':
+								//the only two recursive productions - bound them
+								if(++injson->depth > JSON_MAX_DEPTH) { injson->depth--; return NULL; }
+								outjson = (*(injson->offset) == '[') ? decode_json_array(injson)
+								                                     : decode_json_object(injson);
+								injson->depth--;
+								break;
 						case 'n':  outjson = decode_json_null(injson); break;
 						case 't':  
 						case 'f':  outjson = decode_json_boolean(injson); break;
@@ -350,11 +359,12 @@ json_value * decode_json(const char *injson,int injson_size, apr_pool_t *mpool) 
 	jstring.end = injson + injson_size;
 	jstring.offset = injson;
 	jstring.mpool = mpool;
+	jstring.depth = 0;
 
 	json_value *out = decode_json_value(&jstring);
 
 	//chew up trailing ws - and check for crap at the end
-	while(jstring.offset < jstring.end && isspace(*(jstring.offset))) jstring.offset++;
+	while(jstring.offset < jstring.end && isspace((unsigned char)*(jstring.offset))) jstring.offset++;
 	if(jstring.offset != jstring.end ) { out = NULL; }
 	return out;
 }

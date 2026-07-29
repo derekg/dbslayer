@@ -58,9 +58,10 @@ typedef struct _slayer_http_request_t {
 	char *message;
 	char *message_marker;
 	char *message_end;
-	int payload_size;
+	apr_size_t payload_size;
 	int response_code;
 	int read_done;
+	int handoff_pending;   //removed from the pollset, waiting for a slot on in_queue
 	int done;
 } slayer_http_request_t;
 
@@ -88,5 +89,5 @@ typedef struct _slayer_http_service_map_t {
 } slayer_http_service_map_t;
 
 int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_map, int argc, char **argv, int uri_size,const char *server_name);
-int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *connection, const char *mime_type, const char *message, int message_size);
+int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *connection, const char *mime_type, const char *message, apr_ssize_t message_size);
 #endif //_SLAYER_HTTP_SERVER_H_

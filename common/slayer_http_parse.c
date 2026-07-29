@@ -201,19 +201,22 @@ int slayer_http_request_line_parse(slayer_http_request_parse_t *parse) {
 		} // end of switch
 	}//end of for loop
 
-	parse->buffer_marker = p +1;
+	//p == buffer + buffer_size here; never form a pointer past one-past-the-end
+	parse->buffer_marker = p;
 	parse->request_state = state;
 	return 1;
 REQUEST_LINE_FINISHED:
+	//reached only by goto from inside the loop, so p is dereferenceable and p+1 is at most one-past-the-end
 	parse->buffer_marker = p +1;
 	parse->request_state = PARSE_REQUEST_DONE;
 	return 0;
 }
 
 int check_header(char x) {
-	if (tolower(x) >= 'a' && tolower(x) <= 'z') return 1;
-	if (x == '_' || x == '-' || x == '.') return 1;
-	if (isdigit(x)) return 1;
+	unsigned char c = (unsigned char)x;
+	if (tolower(c) >= 'a' && tolower(c) <= 'z') return 1;
+	if (c == '_' || c == '-' || c == '.') return 1;
+	if (isdigit(c)) return 1;
 	return 0;
 }
 
@@ -329,10 +332,12 @@ int slayer_http_request_header_parse( slayer_http_request_parse_t *parse) {
 
 	}//end of for loop
 HEADER_END:
-	parse->buffer_marker = p +1;
+	//reachable both by falling out of the loop (p == end) and by goto (p < end)
+	parse->buffer_marker = (p < parse->buffer + parse->buffer_size) ? p + 1 : p;
 	parse->header_state = state;
 	return 1;
 HEADER_SECTION_END:
+	//goto only - p is dereferenceable
 	parse->buffer_marker = p +1;
 	parse->header_state = PARSE_HEADER_DONE;
 	return 0;

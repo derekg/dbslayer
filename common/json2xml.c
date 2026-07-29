@@ -52,28 +52,40 @@ apr_status_t xml_object_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpoo
 	return status;
 }
 apr_status_t  xml_string_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,json_value *json) { 
-	//length is *2 for each character if escape + 1 for terminator and +2 for leading/trailing "
-	char *out = apr_pcalloc( mpool, sizeof(char) * ((strlen(json->value.string)*5) +3));  
-	char *p = json->value.string;
+	static const char hex[] = "0123456789ABCDEF";
+	//worst case is a 6 byte &#xNN; reference per input byte, +1 terminator, +2 slack
+	char *out = apr_pcalloc( mpool, sizeof(char) * ((strlen(json->value.string)*6) +3));
+	unsigned char *p = (unsigned char*)json->value.string;
 	char *op = out;
 	while(*p !='\0') { 
 		switch(*p) { 
 			case '&': *op++ = '&'; *op++='a'; *op++='m'; *op++='p'; *op++=';'; break;
 			case '<': *op++ = '&'; *op++='l'; *op++='t';  *op++=';'; break;
 			case '>': *op++ = '&'; *op++='g'; *op++='t';  *op++=';'; break;
+			case '\t':
+			case '\n':
+			case '\r':
+				//legal in XML 1.0, but emit as a reference so they survive whitespace normalisation
+				*op++='&'; *op++='#'; *op++='x';
+				*op++=hex[(*p >> 4) & 0x0f]; *op++=hex[*p & 0x0f]; *op++=';';
+				break;
 			default:
+					//XML 1.0 cannot represent the remaining C0 controls in any form - drop them
+					if(*p < 0x20) break;
 					*op++= *p;
 		}
 		p++;
 	}
 	return apr_brigade_write(bbrigade,NULL,NULL,out,op-out);
 }
-apr_status_t xml_number_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) { 
+apr_status_t xml_number_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) {
 	if(json->type == JSON_LONG) {
 		return apr_brigade_printf(bbrigade,NULL,NULL,"%ld",json->value.lnumber);
-	} else {  
+	} else if(json->type == JSON_LONGLONG) {
+		return apr_brigade_printf(bbrigade,NULL,NULL,"%lld",json->value.llnumber);
+	} else {
 		char *buf = apr_palloc(mpool,sizeof(char)*512);
-		snprintf(buf,512,"%g",json->value.dnumber);	
+		snprintf(buf,512,"%g",json->value.dnumber);
 		//apr %g doesn't prepend leading 0 for values less than 1 - violates json parsers
 		return apr_brigade_printf(bbrigade,NULL,NULL,buf);
 	}
@@ -88,7 +100,8 @@ apr_status_t xml_null_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,
 apr_status_t xml_serialize_internal(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) { 
 	switch(json->type){
 		case JSON_STRING: return xml_string_serialize(bbrigade,mpool,json);
-		case JSON_LONG: 
+		case JSON_LONG:
+		case JSON_LONGLONG:
 		case JSON_DOUBLE: return xml_number_serialize(bbrigade,mpool,json);
 		case JSON_BOOLEAN: return xml_boolean_serialize(bbrigade,mpool,json); 
 		case JSON_NULL: return xml_null_serialize(bbrigade,mpool,json); 

@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include "slayer_http_server.h"
 #include "slayer_http_fileserver.h"
 
@@ -21,26 +23,32 @@ static char * slayer_http_response_code_lookup(int code) {
 	return description;
 }
 
-int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *client, const char *mime_type, const char *message, int message_size){
+int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connection_t *client, const char *mime_type, const char *message, apr_ssize_t message_size){
 	apr_status_t status;
+	apr_size_t body_size, header_size, total;
 	char dstring[APR_RFC822_DATE_LEN];
 	apr_rfc822_date(dstring,apr_time_now());
-	if(message_size == -1) message_size = strlen(message);
+	body_size = (message_size < 0) ? strlen(message) : (apr_size_t)message_size;
+	client->request->payload_size = body_size;
 	char *header_response = slayer_http_response_code_lookup(client->request->response_code);
 	char *header = apr_pstrcat(client->request->mpool, "HTTP/1.0 ",header_response, "\r\n",
 	                                   "Date: ",dstring,"\r\n",
 	                                   "Server: ",server->server_name,"\r\n",
 	                                   "Content-type: ", mime_type, "\r\n",
-	                                   "Content-Length: ",apr_itoa(client->request->mpool,client->request->payload_size = message_size),"\r\n",
+	                                   "Content-Length: ",apr_psprintf(client->request->mpool,"%" APR_SIZE_T_FMT,body_size),"\r\n",
 	                                   "Connection: close\r\n",
 	                                   "\r\n",NULL);
 
-	int size; 
-	int	header_size = strlen(header); 
-	client->request->message_marker = client->request->message = apr_palloc(client->request->mpool, (size = header_size + message_size));
-	client->request->message_end = client->request->message_marker + size;
+	header_size = strlen(header);
+	if (body_size > APR_SIZE_MAX - header_size) {
+		//cannot happen with a real message, but never let the addition wrap
+		return APR_ENOMEM;
+	}
+	total = header_size + body_size;
+	client->request->message_marker = client->request->message = apr_palloc(client->request->mpool, total);
+	client->request->message_end = client->request->message_marker + total;
 	memcpy(client->request->message,header,header_size);
-	memcpy(client->request->message + header_size, message, message_size);
+	memcpy(client->request->message + header_size, message, body_size);
 	while ((status = apr_queue_push(server->out_queue,client)) == APR_EINTR);
 	return status;
 }
@@ -104,7 +112,13 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 			status = apr_pollset_poll(pollset, server->socket_timeout , &events, &ret_pfd);
 			if (apr_atomic_read32(&(server->shutdown))) return 0;
 			//update_alsotry(td_shared->alsotry,td_shared->config); -- NOT SURE WHAT TO ABOUT THIS ONE -  TODO: add additional function
-		} while (status == APR_TIMEUP);
+		} while (status == APR_TIMEUP && connections_count == 0);
+		if (status == APR_TIMEUP) {
+			//nothing readable, but connections are open: fall through to the sweep so
+			//timeouts are reaped and deferred handoffs are retried
+			events = 0;
+			status = APR_SUCCESS;
+		}
 		if (status == APR_SUCCESS) {
 			int i;
 			for ( i = 0; i < events; i++) {
@@ -124,6 +138,18 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 
 						//setup the socket
 						status = apr_socket_accept(&(connection->conn),conn,connection->mpool);
+						if (status != APR_SUCCESS) {
+							//non-blocking listener: EAGAIN is a normal spurious wakeup, anything
+							//else is worth a log line. either way there is no connection to track.
+							if (!APR_STATUS_IS_EAGAIN(status)) {
+								char ebuf[256];
+								slayer_server_log_message(server->elmanager,
+									apr_pstrcat(cmpool,"ERROR in apr_socket_accept - ",
+									            apr_strerror(status,ebuf,sizeof(ebuf)),"\n",NULL));
+							}
+							apr_pool_destroy(cmpool);
+							continue;
+						}
 						status = apr_socket_opt_set(connection->conn,APR_SO_NONBLOCK,1);
 						memset(&connection->pollfd,0,sizeof(apr_pollfd_t));
 
@@ -164,9 +190,31 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 			for (i = 0; i < sizeof(connections) /sizeof(slayer_http_connection_t*); i++) {
 				if (connections[i] != NULL  && connections[i]->request != NULL) {
 					if (connections[i]->request->read_done) {
-						apr_pollset_remove(pollset,&(connections[i]->pollfd));
-						while ((status == apr_queue_push(server->in_queue,connections[i])) == APR_EINTR);
+						if (!connections[i]->request->handoff_pending) {
+							apr_pollset_remove(pollset,&(connections[i]->pollfd));
+							connections[i]->request->handoff_pending = 1;
+						}
+						while ((status = apr_queue_trypush(server->in_queue,connections[i])) == APR_EINTR);
 						if (status == APR_EOF) return 0;
+						if (status == APR_EAGAIN) {
+							/** every worker is busy. do NOT block here - this thread is also the
+							    accept loop, the read loop and the timeout reaper for every other
+							    connection. leave this one parked and retry on the next pass. **/
+							if (apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {
+								apr_socket_close(connections[i]->conn);
+								apr_pool_destroy(connections[i]->mpool);
+								connections[i] = NULL;
+								connections_count--;
+							}
+							continue;
+						}
+						if (status != APR_SUCCESS) {
+							apr_socket_close(connections[i]->conn);
+							apr_pool_destroy(connections[i]->mpool);
+							connections[i] = NULL;
+							connections_count--;
+							continue;
+						}
 						connections[i] = NULL;
 						connections_count--;
 					} else if (connections[i]->request->done || apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {
@@ -309,7 +357,7 @@ terminate:
 }
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *client, void **tl_config) {
-	apr_status_t status;
+	apr_status_t status = APR_SUCCESS;
 	slayer_http_request_parse_t *parse= client->request->parse;
 	int i;
 
@@ -348,6 +396,12 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 				client->request->response_code = 200;	
 				slayer_http_handle_response(server, client ,SLAYER_MT_TEXT_PLAIN,"going down",-1);
 				status = apr_socket_close(client->conn);
+				if (status != APR_SUCCESS) {
+					char ebuf[256];
+					slayer_server_log_message(server->elmanager,
+						apr_pstrcat(client->request->mpool,"ERROR closing /shutdown socket - ",
+						            apr_strerror(status,ebuf,sizeof(ebuf)),"\n",NULL));
+				}
 				apr_pool_destroy(client->mpool);
 				return APR_EOF;
 			}
@@ -469,11 +523,31 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		server.elogfile = apr_pstrcat(server.mpool,reldir,"/",server.elogfile,NULL);
 	}
 
+	if (server.debug == NULL) {
+		//the credentials live in the heap for the process lifetime (the reconnect path in
+		//db_handle_reattach needs them), so a core file is a credential disclosure. keep
+		//cores for -d debug runs only.
+		struct rlimit rl;
+		rl.rlim_cur = rl.rlim_max = 0;
+		setrlimit(RLIMIT_CORE,&rl);
+	}
+
 	chdir("/tmp"); // so I can dump core someplace that I am likely to have write access to
 
 	//call the global initializers
 	for(i = 0; i < server.service_map_size; i++) { 
 		if(server.service_map[i]->service->service_global_init_func) server.service_map[i]->global_config = server.service_map[i]->service->service_global_init_func(server.mpool,argc,argv);
+	}
+
+	//
+	//100 was intended to be a command line argument but number of commandline args is growing out of control
+	if (slayer_server_log_open(&(server.lmanager),server.logfile,100,NULL) != APR_SUCCESS) {
+		fprintf(stderr,"dbslayer: refusing to start without the requested access log\n");
+		exit(-1);
+	}
+	if (slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL) != APR_SUCCESS) {
+		fprintf(stderr,"dbslayer: refusing to start without the requested error log\n");
+		exit(-1);
 	}
 
 	if (server.debug == NULL) {
@@ -488,16 +562,15 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	apr_threadattr_detach_set(thread_attr,0); // don't detach
 	apr_threadattr_stacksize_set(thread_attr,4096*10);
 
-	//
-	//100 was intended to be a command line argument but number of commandline args is growing out of control
-	slayer_server_log_open(&(server.lmanager),server.logfile,100,NULL);
-	slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL);
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {
+		//never echo a credential back over /stats/args, whatever the global initialisers did
+		const char *arg = argv[i];
+		if (i > 0 && strcmp(argv[i-1],"-x") == 0) arg = "[redacted]";
 		if (server.startup_args == NULL) {
-			server.startup_args = apr_pstrcat(server.mpool,argv[i],NULL);
+			server.startup_args = apr_pstrcat(server.mpool,arg,NULL);
 		} else {
-			server.startup_args = apr_pstrcat(server.mpool,server.startup_args," ",argv[i],NULL);
+			server.startup_args = apr_pstrcat(server.mpool,server.startup_args," ",arg,NULL);
 		}
 	}
 

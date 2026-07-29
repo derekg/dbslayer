@@ -1,0 +1,15 @@
+# Build artifacts
+*.o
+*.a
+Makefile
+config.log
+config.status
+aclocal.m4
+.deps/
+server/dbslayer
+
+# Security scan output
+dbslayer-security-results/
+
+# Plan (not part of source)
+BUGFIX_PLAN.md

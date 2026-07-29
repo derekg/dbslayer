@@ -1,5 +1,21 @@
 #include "slayer_server_logging.h"
 
+/** log fields carry raw request bytes and mysql_error() text - neither may be allowed to
+    forge line structure in the access log **/
+static const char * slayer_log_sanitize(apr_pool_t *mpool, const char *in) {
+	apr_size_t i, len;
+	char *out;
+	if (in == NULL) return "";
+	len = strlen(in);
+	out = apr_palloc(mpool, len + 1);
+	for (i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)in[i];
+		out[i] = (c < 0x20 || c == 0x7f) ? '_' : (char)c;
+	}
+	out[len] = '\0';
+	return out;
+}
+
 /* $Id: slayer_server_logging.c,v 1.1 2008/02/29 00:18:52 derek Exp $ */
 
 int slayer_server_log_open(slayer_server_log_manager_t **_manager,const char *filename, int nentries, apr_pool_t *mpool) {
@@ -13,7 +29,15 @@ int slayer_server_log_open(slayer_server_log_manager_t **_manager,const char *fi
 	//only create if there is a non-null filename passed in
 	if (filename) {
 		status = apr_thread_mutex_create(&manager->file_mutex,APR_THREAD_MUTEX_DEFAULT,manager->mpool);
+		if (status != APR_SUCCESS) return status;
 		status = apr_file_open(&manager->fhandle,filename,APR_CREATE | APR_WRITE | APR_APPEND | APR_BUFFERED,APR_OS_DEFAULT,manager->mpool);
+		if (status != APR_SUCCESS) {
+			char ebuf[256];
+			manager->fhandle = NULL; //apr_file_open leaves it untouched on failure - be explicit
+			fprintf(stderr,"dbslayer: could not open log file '%s' - %s\n",
+			        filename,apr_strerror(status,ebuf,sizeof(ebuf)));
+			return status;
+		}
 	}
 	status = apr_thread_mutex_create(&manager->list_mutex,APR_THREAD_MUTEX_DEFAULT,manager->mpool);
 
@@ -40,12 +64,13 @@ int slayer_server_log_close(slayer_server_log_manager_t *manager) {
 	return 0;
 }
 int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *mpool, apr_socket_t *conn,
-                               const char *request_line, int response_code, int nbytes_sent, apr_int64_t time_toservice) {
+                               const char *request_line, int response_code, apr_size_t nbytes_sent, apr_int64_t time_toservice) {
 	//generate data
 	char dstring[1024];
 	apr_int64_t current_time = apr_time_now();
 	apr_size_t result_size;
 	apr_time_exp_t ltime;
+	request_line = slayer_log_sanitize(mpool,request_line);
 	apr_time_exp_lt(&ltime,current_time);
 	apr_strftime (dstring, &result_size, sizeof(dstring), "%d/%b/%Y:%H:%M:%S %z", &ltime );
 
@@ -55,7 +80,9 @@ int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *
 	apr_sockaddr_ip_get(&client_ip,client_addr);
 	if (manager->fhandle) {
 		char *message = apr_pstrcat(mpool,client_ip," - - ","[",dstring,"] \"",request_line,"\" ",
-		                            apr_itoa(mpool,response_code)," ",apr_itoa(mpool,nbytes_sent), " ",apr_ltoa(mpool,time_toservice), "\n",NULL);
+		                            apr_itoa(mpool,response_code)," ",
+		                            apr_psprintf(mpool,"%" APR_SIZE_T_FMT,nbytes_sent), " ",
+		                            apr_ltoa(mpool,time_toservice), "\n",NULL);
 		slayer_server_log_message(manager,message);
 	}
 	slayer_server_log_add_entry(manager,mpool,client_ip,current_time,request_line,response_code,nbytes_sent,time_toservice);
@@ -69,6 +96,8 @@ int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_
 	apr_size_t result_size;
 	apr_int64_t current_time = apr_time_now();
 	apr_time_exp_t ltime;
+	request_line  = slayer_log_sanitize(mpool,request_line);
+	error_message = slayer_log_sanitize(mpool,error_message);
 	apr_time_exp_lt(&ltime,current_time);
 	apr_strftime (dstring, &result_size, sizeof(dstring), "%d/%b/%Y:%H:%M:%S %z", &ltime );
 
@@ -90,14 +119,14 @@ int slayer_server_log_err_message(slayer_server_log_manager_t *manager,apr_pool_
 void slayer_server_log_add_entry(slayer_server_log_manager_t *manager, apr_pool_t *mpool,
                                   const char *client_ip,apr_int64_t rtime,
                                   const char *request_line,int response_code,
-                                  int nbytes_sent, apr_int64_t time_toservice ) {
+                                  apr_size_t nbytes_sent, apr_int64_t time_toservice ) {
 
 	json_value *container = json_object_create(mpool);
 	json_object_add(container,"client_ip",json_string_create(mpool,client_ip));
 	json_object_add(container,"request_time",json_long_create(mpool,rtime / (1000*1000)));
 	json_object_add(container,"request",json_string_create(mpool,request_line));
 	json_object_add(container,"response_code",json_long_create(mpool,response_code));
-	json_object_add(container,"bytes_sent",json_long_create(mpool,nbytes_sent));
+	json_object_add(container,"bytes_sent",json_long_create(mpool,(long)nbytes_sent));
 	json_object_add(container,"time_toservice",json_long_create(mpool,time_toservice));
 	char *json_entry = strdup(json_serialize(mpool,container)); //we want our own copy of this data
 
