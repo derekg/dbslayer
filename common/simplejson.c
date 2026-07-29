@@ -347,7 +347,7 @@ json_value * decode_json_value(json_string *injson) {
 						case '9':  
 						case '0':  outjson = decode_json_number(injson); break;
 						default:
-								printf("XError %s\n",injson->jstring); return NULL;
+								return NULL;
 		}
 	}//end of if
 	return outjson;

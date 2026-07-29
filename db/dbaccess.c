@@ -395,8 +395,6 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 			}
 			status = mysql_next_result(db);
 			if (status > 0) {
-				/** a statement inside a CLIENT_MULTI_STATEMENTS batch failed. stdout is
-				    /dev/null after apr_proc_detach - the client has to be told. **/
 				db_report_error(out,mpool,db,dbserver_name,injson);
 				break;
 			}

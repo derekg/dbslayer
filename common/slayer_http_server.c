@@ -231,8 +231,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							connection->request->read_done = 1;
 						}
 					} else {
-						printf("oddball case\n");
-						//print handle oddball case
+						slayer_server_log_message(server->elmanager,"oddball poll event\n");
 					}
 				}
 			}//end of for loop
