@@ -61,6 +61,7 @@ static apr_status_t slayer_http_connection_close(
 			}
 		}
 		connection->connection_counted = 0;
+		apr_atomic_dec32(&connection->server->active_connections);
 		apr_thread_mutex_unlock(connection->server->connection_counts_mutex);
 	}
 	if (connection->tls != NULL) {
@@ -91,6 +92,7 @@ static int slayer_http_connection_count_increment(
 	}
 	current = ++(*count);
 	connection->connection_counted = 1;
+	apr_atomic_inc32(&server->active_connections);
 	apr_thread_mutex_unlock(server->connection_counts_mutex);
 	return current;
 }
@@ -547,6 +549,30 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 			                            "Unauthorized", -1);
 			return APR_SUCCESS;
 		}
+	}
+	if (strcmp(client->request->uri.path, "/metrics") == 0) {
+		slayer_server_stats_t stats;
+		char *message;
+		slayer_server_stats_get(server->stats, &stats);
+		message = apr_psprintf(
+			client->request->mpool,
+			"# HELP dbslayer_requests_total Total requests processed\n"
+			"# TYPE dbslayer_requests_total counter\n"
+			"dbslayer_requests_total %d\n"
+			"# HELP dbslayer_active_connections Current active connections\n"
+			"# TYPE dbslayer_active_connections gauge\n"
+			"dbslayer_active_connections %u\n"
+			"# HELP dbslayer_db_errors_total Total database errors\n"
+			"# TYPE dbslayer_db_errors_total counter\n"
+			"dbslayer_db_errors_total %u\n",
+			stats.total_requests,
+			(unsigned int)apr_atomic_read32(&server->active_connections),
+			(unsigned int)apr_atomic_read32(&server->db_errors_total));
+		client->request->response_code = 200;
+		slayer_http_handle_response(
+			server, client, "text/plain; version=0.0.4; charset=utf-8",
+			message, -1);
+		return APR_SUCCESS;
 	}
 	int nothandled = 1;
 	for(i = 0; nothandled && i < server->service_map_size ; i++) { 

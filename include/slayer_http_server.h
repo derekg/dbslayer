@@ -33,6 +33,8 @@ typedef struct _slayer_http_server_t {
 	apr_queue_t *out_queue;
 	apr_hash_t *connection_counts;
 	apr_thread_mutex_t *connection_counts_mutex;
+	volatile apr_uint32_t active_connections;
+	volatile apr_uint32_t db_errors_total;
 	volatile apr_uint32_t  shutdown;
 	int argc;
 	const char **argv;

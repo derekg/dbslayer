@@ -91,6 +91,7 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					json_value *result = dbexecute(dbhandle,stmt,client->request->mpool);
 					json_value *errors = result->type == JSON_OBJECT ? json_skip_get(result->value.object,"MYSQL_ERROR") : NULL;
 					if(errors) { 
+									apr_atomic_inc32(&server->db_errors_total);
 									char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
 									slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,apr_pstrcat(client->request->mpool,"ERROR: ",errors->value.string,NULL));
 					}
