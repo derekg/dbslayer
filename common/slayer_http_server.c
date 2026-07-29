@@ -18,6 +18,8 @@ typedef struct _slayer_listener_config_t {
 	slayer_tls_ctx *tls_ctx;
 } slayer_listener_config_t;
 
+static volatile apr_uint32_t slayer_request_id_counter = 0;
+
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
 
 #define MAX_CONNECTIONS_PER_IP 50
@@ -114,13 +116,18 @@ int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connec
 	apr_status_t status;
 	apr_size_t body_size, header_size, total;
 	char dstring[APR_RFC822_DATE_LEN];
+	char *request_id;
 	apr_rfc822_date(dstring,apr_time_now());
+	request_id = apr_psprintf(
+		client->request->mpool, "dbslayer-%u",
+		(unsigned int)(apr_atomic_inc32(&slayer_request_id_counter) + 1));
 	body_size = (message_size < 0) ? strlen(message) : (apr_size_t)message_size;
 	client->request->payload_size = body_size;
 	char *header_response = slayer_http_response_code_lookup(client->request->response_code);
 	char *header = apr_pstrcat(client->request->mpool, "HTTP/1.0 ",header_response, "\r\n",
 	                                   "Date: ",dstring,"\r\n",
 	                                   "Server: ",server->server_name,"\r\n",
+	                                   "X-Request-ID: ",request_id,"\r\n",
 	                                   "Content-type: ", mime_type, "\r\n",
 	                                   "Content-Length: ",apr_psprintf(client->request->mpool,"%" APR_SIZE_T_FMT,body_size),"\r\n",
 	                                   "Connection: close\r\n",
