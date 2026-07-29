@@ -3,6 +3,9 @@
 #include <libgen.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#ifdef HAVE_OPENSSL
+#include <openssl/crypto.h>
+#endif
 #include "slayer_http_server.h"
 #include "slayer_http_fileserver.h"
 #include "slayer_tls.h"
@@ -16,6 +19,27 @@ typedef struct _slayer_listener_config_t {
 } slayer_listener_config_t;
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
+
+static int slayer_auth_token_matches(const char *provided,
+                                     const char *expected) {
+	apr_size_t provided_len = strlen(provided);
+	apr_size_t expected_len = strlen(expected);
+
+	if (provided_len != expected_len) return 0;
+#ifdef HAVE_OPENSSL
+	return CRYPTO_memcmp(provided, expected, expected_len) == 0;
+#else
+	{
+		volatile unsigned char difference = 0;
+		apr_size_t i;
+		for (i = 0; i < expected_len; i++) {
+			difference |=
+				(unsigned char)provided[i] ^ (unsigned char)expected[i];
+		}
+		return difference == 0;
+	}
+#endif
+}
 
 static apr_status_t slayer_http_connection_close(
 		slayer_http_connection_t *connection) {
@@ -445,7 +469,8 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 		const char *auth_header =
 			slayer_http_header_get(client->request->parse, "Authorization");
 		if (auth_header == NULL || strncmp(auth_header, "Bearer ", 7) != 0 ||
-		    strcmp(auth_header + 7, server->auth_token) != 0) {
+		    !slayer_auth_token_matches(auth_header + 7,
+		                               server->auth_token)) {
 			client->request->response_code = 401;
 			slayer_http_handle_response(server, client, "text/plain",
 			                            "Unauthorized", -1);
