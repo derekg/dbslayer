@@ -528,6 +528,12 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 		apr_pool_destroy(client->mpool);
 		return APR_SUCCESS;
 	}
+	if (strcmp(client->request->uri.path, "/health") == 0) {
+		client->request->response_code = 200;
+		slayer_http_handle_response(server, client, "application/json",
+		                            "{\"status\":\"ok\"}", -1);
+		return APR_SUCCESS;
+	}
 	/* /shutdown still performs its local-IP check below; when bearer auth is
 	   configured, it must pass both checks. */
 	if (server->auth_token != NULL) {
