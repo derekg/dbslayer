@@ -309,7 +309,7 @@ terminate:
 }
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *client, void **tl_config) {
-	apr_status_t status;
+	apr_status_t status = APR_SUCCESS;
 	slayer_http_request_parse_t *parse= client->request->parse;
 	int i;
 
@@ -348,6 +348,12 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 				client->request->response_code = 200;	
 				slayer_http_handle_response(server, client ,SLAYER_MT_TEXT_PLAIN,"going down",-1);
 				status = apr_socket_close(client->conn);
+				if (status != APR_SUCCESS) {
+					char ebuf[256];
+					slayer_server_log_message(server->elmanager,
+						apr_pstrcat(client->request->mpool,"ERROR closing /shutdown socket - ",
+						            apr_strerror(status,ebuf,sizeof(ebuf)),"\n",NULL));
+				}
 				apr_pool_destroy(client->mpool);
 				return APR_EOF;
 			}
