@@ -17,6 +17,15 @@ typedef struct _slayer_listener_config_t {
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
 
+static apr_status_t slayer_http_connection_close(
+		slayer_http_connection_t *connection) {
+	if (connection->tls != NULL) {
+		slayer_tls_close(connection->tls);
+		connection->tls = NULL;
+	}
+	return apr_socket_close(connection->conn);
+}
+
 static char * slayer_http_response_code_lookup(int code) {
 	char *description = "500 Internal Server Error";
 	switch(code) { 
@@ -60,12 +69,23 @@ int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connec
 	return status;
 }
 
-static int request_parse(apr_socket_t *conn, slayer_http_request_parse_t *http_request) {
+static int request_parse(slayer_http_connection_t *connection) {
 	apr_status_t conn_status;
 	int parse_status;
+	slayer_http_request_parse_t *http_request = connection->request->parse;
 
 	if (http_request->buffer_marker == NULL || http_request->buffer_marker >= http_request->buffer+http_request->buffer_size) {
-		conn_status = apr_socket_recv(conn,http_request->buffer,&(http_request->buffer_size));
+		if (connection->tls != NULL) {
+			int received = slayer_tls_recv(connection->tls,
+			                              http_request->buffer,
+			                              (int)http_request->buffer_size);
+			conn_status = received > 0 ? APR_SUCCESS : APR_EGENERAL;
+			http_request->buffer_size =
+				received > 0 ? (apr_size_t)received : 0;
+		} else {
+			conn_status = apr_socket_recv(connection->conn,http_request->buffer,
+			                              &(http_request->buffer_size));
+		}
 		if (conn_status !=APR_SUCCESS || http_request->buffer_size == 0) return -1;
 		http_request->buffer_marker = http_request->buffer;
 	}
@@ -168,7 +188,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							connection->tls = slayer_tls_accept(tls_ctx,
 							                                    connection->conn);
 							if (connection->tls == NULL) {
-								apr_socket_close(connection->conn);
+								slayer_http_connection_close(connection);
 								apr_pool_destroy(cmpool);
 								continue;
 							}
@@ -199,7 +219,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 					} else if ( ret_pfd[i].rtnevents & APR_POLLHUP) {
 						connection->request->done = 1;
 					} else if ( ret_pfd[i].rtnevents & APR_POLLIN || ret_pfd[i].rtnevents & APR_POLLPRI) {
-						if (request_parse(connection->conn,connection->request->parse) == -1) {
+						if (request_parse(connection) == -1) {
 							connection->request->done = 1;
 						} else if (connection->request->parse->header_state == PARSE_HEADER_DONE) {
 							connection->request->read_done = 1;
@@ -224,7 +244,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							    accept loop, the read loop and the timeout reaper for every other
 							    connection. leave this one parked and retry on the next pass. **/
 							if (apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {
-								apr_socket_close(connections[i]->conn);
+								slayer_http_connection_close(connections[i]);
 								apr_pool_destroy(connections[i]->mpool);
 								connections[i] = NULL;
 								connections_count--;
@@ -232,7 +252,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							continue;
 						}
 						if (status != APR_SUCCESS) {
-							apr_socket_close(connections[i]->conn);
+							slayer_http_connection_close(connections[i]);
 							apr_pool_destroy(connections[i]->mpool);
 							connections[i] = NULL;
 							connections_count--;
@@ -242,7 +262,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 						connections_count--;
 					} else if (connections[i]->request->done || apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000) {
 						apr_pollset_remove(pollset,&(connections[i]->pollfd));
-						apr_socket_close(connections[i]->conn);
+						slayer_http_connection_close(connections[i]);
 						apr_pool_destroy(connections[i]->mpool);
 						connections[i] = NULL;
 						connections_count--;
@@ -333,7 +353,17 @@ void* handle_outgoing_response(apr_thread_t *mythread,void * _server) {
 					connection->request->done =1;
 				} else if (ret_pfd[i].rtnevents &  APR_POLLOUT) {
 					apr_size_t bsent = (connection->request->message_end - connection->request->message_marker);
-					status = apr_socket_send(connection->conn,connection->request->message_marker ,&bsent);
+					if (connection->tls != NULL) {
+						int sent = slayer_tls_send(connection->tls,
+						                           connection->request->message_marker,
+						                           (int)bsent);
+						status = sent > 0 ? APR_SUCCESS : APR_EGENERAL;
+						bsent = sent > 0 ? (apr_size_t)sent : 0;
+					} else {
+						status = apr_socket_send(connection->conn,
+						                         connection->request->message_marker,
+						                         &bsent);
+					}
 					if (status != APR_SUCCESS || bsent == 0) {
 						connection->request->done = 1;
 						char *http_request = apr_pstrcat(connection->request->mpool,connection->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",connection->request->parse->uri_data,connection->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
@@ -352,7 +382,7 @@ void* handle_outgoing_response(apr_thread_t *mythread,void * _server) {
 			for (i = 0; connection_count > 0 && i < sizeof(connections) /sizeof(slayer_http_connection_t*); i++) {
 				if (connections[i] != NULL && (connections[i]->request->done || apr_time_as_msec(apr_time_now() - connections[i]->request->begin_request) > 10000)) {
 					apr_pollset_remove(pollset,&(connections[i]->pollfd));
-					apr_socket_close(connections[i]->conn);
+					slayer_http_connection_close(connections[i]);
 					apr_pool_destroy(connections[i]->mpool);
 					connections[i] = NULL;
 					connection_count--;
@@ -375,7 +405,7 @@ void* handle_outgoing_response(apr_thread_t *mythread,void * _server) {
 				}
 			}
 			if (i == sizeof(connections) / sizeof(slayer_http_connection_t*)) {
-				apr_socket_close(connection->conn);
+				slayer_http_connection_close(connection);
 				apr_pool_destroy(connection->mpool);
 			}
 		} else if ( status == APR_EOF) {
@@ -394,7 +424,7 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 
 	apr_uri_parse(client->request->mpool,parse->uri_start,&(client->request->uri));
 	if (client->request->uri.path == NULL) {
-		apr_socket_close(client->conn);
+		slayer_http_connection_close(client);
 		apr_pool_destroy(client->mpool);
 		return APR_SUCCESS;
 	}
@@ -439,7 +469,7 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 			} else { 
 				client->request->response_code = 200;	
 				slayer_http_handle_response(server, client ,SLAYER_MT_TEXT_PLAIN,"going down",-1);
-				status = apr_socket_close(client->conn);
+				status = slayer_http_connection_close(client);
 				if (status != APR_SUCCESS) {
 					char ebuf[256];
 					slayer_server_log_message(server->elmanager,
