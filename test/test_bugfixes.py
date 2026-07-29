@@ -71,14 +71,22 @@ class DBSlayerTest:
 
     def http_get(self, path, headers=None):
         """Make an HTTP GET request, return (status_code, body_text)."""
+        status, body, _ = self.http_get_response(path, headers)
+        return status, body
+
+    def http_get_response(self, path, headers=None):
+        """Make an HTTP GET request, including response headers."""
         conn = http.client.HTTPConnection(HOST, PORT, timeout=5)
         try:
             conn.request("GET", path, headers=headers or {})
             resp = conn.getresponse()
             body = resp.read().decode("utf-8", errors="replace")
-            return resp.status, body
+            response_headers = {
+                name.lower(): value for name, value in resp.getheaders()
+            }
+            return resp.status, body, response_headers
         except Exception as e:
-            return -1, str(e)
+            return -1, str(e), {}
         finally:
             conn.close()
 
@@ -207,6 +215,100 @@ class DBSlayerTest:
         status2, _ = self.http_get("/stats")
         self.assert_true("F11: server alive after deep nesting", status2 == 200)
 
+    def test_header_limit(self):
+        """P1.4: more than 32 KiB of headers is rejected."""
+        request = (
+            b"GET /health HTTP/1.0\r\n"
+            b"Host: localhost\r\n"
+            b"X-Oversized: " + (b"a" * 33000) + b"\r\n\r\n"
+        )
+        data = b""
+        try:
+            s = socket.create_connection((HOST, PORT), timeout=5)
+            try:
+                s.sendall(request)
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            finally:
+                s.close()
+        except (ConnectionResetError, BrokenPipeError, socket.timeout):
+            pass
+        status_line = data.split(b"\r\n", 1)[0] if data else b""
+        rejected = not data or any(
+            code in status_line for code in (b"400", b"413", b"431")
+        )
+        self.assert_true(
+            "P1.4: oversized headers close or reject the connection",
+            rejected,
+            f"unexpected response: {status_line!r}"
+        )
+
+    def test_health_endpoint(self):
+        """P5.1: health checks bypass bearer authentication."""
+        status, body = self.http_get("/health")
+        self.assert_true(
+            "P5.1: /health returns 200 without auth",
+            status == 200,
+            f"got status {status}, body: {body[:200]}"
+        )
+        if status == 200:
+            self.assert_true(
+                "P5.1: /health reports ok",
+                body == '{"status":"ok"}',
+                f"unexpected body: {body[:200]}"
+            )
+
+    def test_metrics_endpoint(self, headers=None):
+        """P5.3: metrics use Prometheus text format."""
+        status, body = self.http_get("/metrics", headers=headers)
+        self.assert_true(
+            "P5.3: /metrics returns 200",
+            status == 200,
+            f"got status {status}, body: {body[:200]}"
+        )
+        if status == 200:
+            for metric in (
+                "dbslayer_requests_total",
+                "dbslayer_active_connections",
+                "dbslayer_db_errors_total",
+            ):
+                self.assert_contains(f"P5.3: /metrics includes {metric}",
+                                     body, metric)
+
+    def test_request_id(self):
+        """P5.4: every response carries a request ID."""
+        status, body, headers = self.http_get_response("/health")
+        request_id = headers.get("x-request-id", "")
+        self.assert_true(
+            "P5.4: response has X-Request-ID",
+            status == 200 and request_id.startswith("dbslayer-"),
+            f"status={status}, X-Request-ID={request_id!r}, body={body[:100]}"
+        )
+
+    def test_json_depth_boundary(self):
+        """P6.2: depth 64 parses and depth 65 is rejected."""
+        parse_error = "couldn't parse your incoming json"
+        at_limit = '{"value":' + ("[" * 63) + "0" + ("]" * 63) + "}"
+        over_limit = '{"value":' + ("[" * 64) + "0" + ("]" * 64) + "}"
+
+        status64, body64 = self.http_get(
+            "/db?" + urllib.parse.quote(at_limit))
+        status65, body65 = self.http_get(
+            "/db?" + urllib.parse.quote(over_limit))
+        self.assert_true(
+            "P6.2: JSON nesting at depth 64 parses",
+            status64 == 200 and parse_error not in body64,
+            f"status={status64}, body={body64[:200]}"
+        )
+        self.assert_true(
+            "P6.2: JSON nesting at depth 65 is rejected",
+            status65 == 200 and parse_error in body65,
+            f"status={status65}, body={body65[:200]}"
+        )
+
     def test_f4_json_control_chars_in_stats(self):
         """F4/F5: /stats response should be valid JSON (control chars escaped)."""
         status, body = self.http_get("/stats")
@@ -276,6 +378,60 @@ class DBSlayerTest:
                          status == 200,
                          f"got status {status}, body: {body[:200]}")
 
+        status, body = self.http_get("/metrics")
+        self.assert_true("P5.3 auth: /metrics without token returns 401",
+                         status == 401,
+                         f"got status {status}, body: {body[:200]}")
+
+    def test_structured_logging(self):
+        """P5.2: -j writes one JSON object per access-log line."""
+        with tempfile.TemporaryDirectory(prefix="dbslayer-log-") as tempdir:
+            logfile = os.path.join(tempdir, "access.log")
+            if not self.start(["-j", "-l", logfile]):
+                self.assert_true("P5.2: JSON logging server starts", False)
+                return
+            try:
+                status, _ = self.http_get("/health")
+                self.assert_true("P5.2: logged /health returns 200",
+                                 status == 200, f"got status {status}")
+                time.sleep(0.2)
+                try:
+                    s = socket.create_connection((HOST, PORT), timeout=5)
+                    s.sendall(
+                        b"GET /shutdown HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                    s.close()
+                    self.proc.wait(timeout=3)
+                    self.proc = None
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            finally:
+                self.stop()
+
+            try:
+                with open(logfile, encoding="utf-8") as log:
+                    entries = [
+                        json.loads(line) for line in log if line.strip()
+                    ]
+            except (OSError, json.JSONDecodeError) as error:
+                self.assert_true("P5.2: access log contains valid JSON",
+                                 False, str(error))
+                return
+            health_entries = [
+                entry for entry in entries if entry.get("path") == "/health"
+            ]
+            required = {
+                "ts", "ip", "method", "path", "status", "bytes",
+                "duration_ms"
+            }
+            self.assert_true(
+                "P5.2: access log contains structured /health entry",
+                bool(health_entries) and
+                required.issubset(health_entries[0]) and
+                health_entries[0]["method"] == "GET" and
+                health_entries[0]["status"] == 200,
+                f"entries: {entries[:3]}"
+            )
+
     def test_tls(self):
         """S9: TLS listener serves a basic HTTPS request when OpenSSL is enabled."""
         makefile = os.path.join(os.path.dirname(__file__), "..", "common",
@@ -329,6 +485,10 @@ class DBSlayerTest:
             self.test_f8_non_object_json_root,
             self.test_f9_accept_failure_resilience,
             self.test_f11_json_depth_limit,
+            self.test_header_limit,
+            self.test_metrics_endpoint,
+            self.test_request_id,
+            self.test_json_depth_boundary,
             self.test_f4_json_control_chars_in_stats,
             self.test_f17_password_not_in_stats_args,
             self.test_f6_log_injection_crlf,
@@ -350,8 +510,16 @@ class DBSlayerTest:
         else:
             try:
                 self.test_bearer_auth()
+                self.test_health_endpoint()
+                self.test_metrics_endpoint(
+                    headers={
+                        "Authorization": "Bearer dbslayer-test-token"
+                    })
             finally:
                 self.stop()
+
+        print("\nStructured logging")
+        self.test_structured_logging()
 
         print("\nTLS")
         self.test_tls()

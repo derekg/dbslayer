@@ -4,11 +4,13 @@
 #include <apr_atomic.h>
 #include <apr_file_info.h>
 #include <apr_general.h>
+#include <apr_hash.h>
 #include <apr_network_io.h>
 #include <apr_poll.h>
 #include <apr_queue.h>
 #include <apr_strings.h>
 #include <apr_thread_proc.h>
+#include <apr_thread_mutex.h>
 #include <apr_thread_rwlock.h>
 #include <apr_time.h>
 #include <apr_uri.h>
@@ -29,6 +31,10 @@ typedef struct _slayer_http_server_t {
 	slayer_server_stats_t  *stats;
 	apr_queue_t *in_queue;
 	apr_queue_t *out_queue;
+	apr_hash_t *connection_counts;
+	apr_thread_mutex_t *connection_counts_mutex;
+	volatile apr_uint32_t active_connections;
+	volatile apr_uint32_t db_errors_total;
 	volatile apr_uint32_t  shutdown;
 	int argc;
 	const char **argv;
@@ -39,6 +45,7 @@ typedef struct _slayer_http_server_t {
 	char *basedir;
 	char *logfile;
 	char *elogfile;
+	int json_logs;
 	int thread_count;
 	int port;
 	int socket_timeout;
@@ -75,6 +82,9 @@ typedef struct _slayer_http_request_t {
 typedef struct _slayer_http_connection_t { 
 	apr_pool_t *mpool;
 	apr_socket_t *conn;
+	slayer_http_server_t *server;
+	char *remote_ip;
+	int connection_counted;
 	void *tls; /* SSL* — NULL for plaintext connections */
 	apr_pollfd_t pollfd;
 	slayer_http_request_t *request;

@@ -91,6 +91,7 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					json_value *result = dbexecute(dbhandle,stmt,client->request->mpool);
 					json_value *errors = result->type == JSON_OBJECT ? json_skip_get(result->value.object,"MYSQL_ERROR") : NULL;
 					if(errors) { 
+									apr_atomic_inc32(&server->db_errors_total);
 									char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
 									slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,apr_pstrcat(client->request->mpool,"ERROR: ",errors->value.string,NULL));
 					}
@@ -133,22 +134,6 @@ int main(int argc, char **argv) {
 	service_map[0] = malloc(sizeof(slayer_http_service_map_t));
 	service_map[0]->urls = urls;
 	service_map[0]->service = &handler;
-
-/*
-	slayer_http_service_t dummy_handler;
-	dummy_handler.help_string = "dummy don't need to be configured";
-	dummy_handler.service_global_init_func = NULL;
-	dummy_handler.service_global_destroy_func = NULL;
-	dummy_handler.service_thread_init_func = NULL;
-	dummy_handler.service_thread_destroy_func = NULL;
-	dummy_handler.service_handler_func = xdummy_handler;
-
-	char *dummy_urls[] = {"/dummy",NULL};
-	service_map[1] = malloc(sizeof(slayer_http_service_map_t));
-	service_map[1]->urls = dummy_urls;
-	service_map[1]->service = &dummy_handler;
-*/
-
 
 	srandom(time(NULL));
 	return slayer_server_run(1,service_map,argc,argv,1024 * 1000 ,"dbslayer/beta-18");

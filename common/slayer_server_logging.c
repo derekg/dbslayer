@@ -71,18 +71,56 @@ int slayer_server_log_request(slayer_server_log_manager_t *manager, apr_pool_t *
 	apr_size_t result_size;
 	apr_time_exp_t ltime;
 	request_line = slayer_log_sanitize(mpool,request_line);
-	apr_time_exp_lt(&ltime,current_time);
-	apr_strftime (dstring, &result_size, sizeof(dstring), "%d/%b/%Y:%H:%M:%S %z", &ltime );
+	if (manager->json_logs) {
+		apr_time_exp_gmt(&ltime,current_time);
+		apr_strftime(dstring, &result_size, sizeof(dstring),
+		             "%Y-%m-%dT%H:%M:%SZ", &ltime);
+	} else {
+		apr_time_exp_lt(&ltime,current_time);
+		apr_strftime(dstring, &result_size, sizeof(dstring),
+		             "%d/%b/%Y:%H:%M:%S %z", &ltime);
+	}
 
 	apr_sockaddr_t *client_addr;
 	char *client_ip;
 	apr_socket_addr_get(&client_addr,0,conn);
 	apr_sockaddr_ip_get(&client_ip,client_addr);
 	if (manager->fhandle) {
-		char *message = apr_pstrcat(mpool,client_ip," - - ","[",dstring,"] \"",request_line,"\" ",
-		                            apr_itoa(mpool,response_code)," ",
-		                            apr_psprintf(mpool,"%" APR_SIZE_T_FMT,nbytes_sent), " ",
-		                            apr_ltoa(mpool,time_toservice), "\n",NULL);
+		char *message;
+		if (manager->json_logs) {
+			const char *method_end = strchr(request_line, ' ');
+			const char *path_start = method_end == NULL ? "" : method_end + 1;
+			const char *path_end = strchr(path_start, ' ');
+			json_value *entry = json_object_create(mpool);
+			json_object_add(entry, "ts", json_string_create(mpool, dstring));
+			json_object_add(entry, "ip", json_string_create(mpool, client_ip));
+			json_object_add(entry, "method",
+			                json_string_create(
+			                    mpool,
+			                    method_end == NULL ? request_line :
+			                    apr_pstrndup(mpool, request_line,
+			                                  method_end - request_line)));
+			json_object_add(entry, "path",
+			                json_string_create(
+			                    mpool,
+			                    path_end == NULL ? path_start :
+			                    apr_pstrndup(mpool, path_start,
+			                                  path_end - path_start)));
+			json_object_add(entry, "status",
+			                json_long_create(mpool, response_code));
+			json_object_add(entry, "bytes",
+			                json_long_create(mpool, (long)nbytes_sent));
+			json_object_add(entry, "duration_ms",
+			                json_long_create(mpool,
+			                                 (long)(time_toservice / 1000)));
+			message = apr_pstrcat(mpool, json_serialize(mpool, entry), "\n",
+			                      NULL);
+		} else {
+			message = apr_pstrcat(mpool,client_ip," - - ","[",dstring,"] \"",request_line,"\" ",
+			                      apr_itoa(mpool,response_code)," ",
+			                      apr_psprintf(mpool,"%" APR_SIZE_T_FMT,nbytes_sent), " ",
+			                      apr_ltoa(mpool,time_toservice), "\n",NULL);
+		}
 		slayer_server_log_message(manager,message);
 	}
 	slayer_server_log_add_entry(manager,mpool,client_ip,current_time,request_line,response_code,nbytes_sent,time_toservice);

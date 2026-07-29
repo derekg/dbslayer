@@ -3,6 +3,9 @@
 #include <libgen.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#ifdef HAVE_OPENSSL
+#include <openssl/crypto.h>
+#endif
 #include "slayer_http_server.h"
 #include "slayer_http_fileserver.h"
 #include "slayer_tls.h"
@@ -15,15 +18,85 @@ typedef struct _slayer_listener_config_t {
 	slayer_tls_ctx *tls_ctx;
 } slayer_listener_config_t;
 
+static volatile apr_uint32_t slayer_request_id_counter = 0;
+
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
+
+#define MAX_CONNECTIONS_PER_IP 50
+
+static int slayer_auth_token_matches(const char *provided,
+                                     const char *expected) {
+	apr_size_t provided_len = strlen(provided);
+	apr_size_t expected_len = strlen(expected);
+
+	if (provided_len != expected_len) return 0;
+#ifdef HAVE_OPENSSL
+	return CRYPTO_memcmp(provided, expected, expected_len) == 0;
+#else
+	{
+		volatile unsigned char difference = 0;
+		apr_size_t i;
+		for (i = 0; i < expected_len; i++) {
+			difference |=
+				(unsigned char)provided[i] ^ (unsigned char)expected[i];
+		}
+		return difference == 0;
+	}
+#endif
+}
 
 static apr_status_t slayer_http_connection_close(
 		slayer_http_connection_t *connection) {
+	apr_status_t status = APR_SUCCESS;
+
+	if (connection->connection_counted) {
+		int *count;
+		apr_thread_mutex_lock(connection->server->connection_counts_mutex);
+		count = apr_hash_get(connection->server->connection_counts,
+		                     connection->remote_ip, APR_HASH_KEY_STRING);
+		if (count != NULL) {
+			(*count)--;
+			if (*count == 0) {
+				apr_hash_set(connection->server->connection_counts,
+				             connection->remote_ip, APR_HASH_KEY_STRING,
+				             NULL);
+			}
+		}
+		connection->connection_counted = 0;
+		apr_atomic_dec32(&connection->server->active_connections);
+		apr_thread_mutex_unlock(connection->server->connection_counts_mutex);
+	}
 	if (connection->tls != NULL) {
 		slayer_tls_close(connection->tls);
 		connection->tls = NULL;
 	}
-	return apr_socket_close(connection->conn);
+	if (connection->conn != NULL) {
+		status = apr_socket_close(connection->conn);
+		connection->conn = NULL;
+	}
+	return status;
+}
+
+static int slayer_http_connection_count_increment(
+		slayer_http_connection_t *connection) {
+	int *count;
+	int current;
+	slayer_http_server_t *server = connection->server;
+
+	apr_thread_mutex_lock(server->connection_counts_mutex);
+	count = apr_hash_get(server->connection_counts, connection->remote_ip,
+	                     APR_HASH_KEY_STRING);
+	if (count == NULL) {
+		char *key = apr_pstrdup(server->mpool, connection->remote_ip);
+		count = apr_pcalloc(server->mpool, sizeof(int));
+		apr_hash_set(server->connection_counts, key, APR_HASH_KEY_STRING,
+		             count);
+	}
+	current = ++(*count);
+	connection->connection_counted = 1;
+	apr_atomic_inc32(&server->active_connections);
+	apr_thread_mutex_unlock(server->connection_counts_mutex);
+	return current;
 }
 
 static char * slayer_http_response_code_lookup(int code) {
@@ -43,13 +116,18 @@ int slayer_http_handle_response(slayer_http_server_t *server, slayer_http_connec
 	apr_status_t status;
 	apr_size_t body_size, header_size, total;
 	char dstring[APR_RFC822_DATE_LEN];
+	char *request_id;
 	apr_rfc822_date(dstring,apr_time_now());
+	request_id = apr_psprintf(
+		client->request->mpool, "dbslayer-%u",
+		(unsigned int)(apr_atomic_inc32(&slayer_request_id_counter) + 1));
 	body_size = (message_size < 0) ? strlen(message) : (apr_size_t)message_size;
 	client->request->payload_size = body_size;
 	char *header_response = slayer_http_response_code_lookup(client->request->response_code);
 	char *header = apr_pstrcat(client->request->mpool, "HTTP/1.0 ",header_response, "\r\n",
 	                                   "Date: ",dstring,"\r\n",
 	                                   "Server: ",server->server_name,"\r\n",
+	                                   "X-Request-ID: ",request_id,"\r\n",
 	                                   "Content-type: ", mime_type, "\r\n",
 	                                   "Content-Length: ",apr_psprintf(client->request->mpool,"%" APR_SIZE_T_FMT,body_size),"\r\n",
 	                                   "Connection: close\r\n",
@@ -75,6 +153,9 @@ static int request_parse(slayer_http_connection_t *connection) {
 	slayer_http_request_parse_t *http_request = connection->request->parse;
 
 	if (http_request->buffer_marker == NULL || http_request->buffer_marker >= http_request->buffer+http_request->buffer_size) {
+		if (http_request->request_state != PARSE_REQUEST_DONE) {
+			http_request->header_bytes_read = 0;
+		}
 		if (connection->tls != NULL) {
 			int received = slayer_tls_recv(connection->tls,
 			                              http_request->buffer,
@@ -115,8 +196,11 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 	int events;
 	int connections_count = 0;
 	slayer_http_connection_t *connections[500];
+	struct sigaction sa;
 
-	signal(SIGPIPE,SIG_IGN);
+	memset(&sa,0,sizeof(sa));
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE,&sa,NULL);
 	apr_pool_create(&listener_pool,NULL);
 	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,listener_pool);
 	status = apr_socket_opt_set(conn,APR_SO_REUSEADDR,1);
@@ -162,6 +246,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 						apr_pool_create(&cmpool,NULL);
 						connection = apr_pcalloc(cmpool,sizeof(slayer_http_connection_t));
 						connection->mpool = cmpool;
+						connection->server = server;
 						apr_pool_create(&rmpool,connection->mpool);
 						connection->request = apr_pcalloc(rmpool,sizeof(slayer_http_request_t));
 						connection->request->mpool = rmpool;
@@ -181,6 +266,25 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							}
 							apr_pool_destroy(cmpool);
 							continue;
+						}
+						{
+							apr_sockaddr_t *remote_addr;
+							char *remote_ip;
+							if (apr_socket_addr_get(&remote_addr, APR_REMOTE,
+							                        connection->conn) != APR_SUCCESS ||
+							    apr_sockaddr_ip_get(&remote_ip, remote_addr) != APR_SUCCESS) {
+								slayer_http_connection_close(connection);
+								apr_pool_destroy(cmpool);
+								continue;
+							}
+							connection->remote_ip =
+								apr_pstrdup(connection->mpool, remote_ip);
+							if (slayer_http_connection_count_increment(connection) >
+							    MAX_CONNECTIONS_PER_IP) {
+								slayer_http_connection_close(connection);
+								apr_pool_destroy(cmpool);
+								continue;
+							}
 						}
 						if (tls_ctx != NULL) {
 							apr_socket_timeout_set(connection->conn,
@@ -231,8 +335,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 							connection->request->read_done = 1;
 						}
 					} else {
-						printf("oddball case\n");
-						//print handle oddball case
+						slayer_server_log_message(server->elmanager,"oddball poll event\n");
 					}
 				}
 			}//end of for loop
@@ -434,18 +537,49 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 		apr_pool_destroy(client->mpool);
 		return APR_SUCCESS;
 	}
-	/* bearer token check — skip for /shutdown (has its own local-IP auth) */
-	if (server->auth_token != NULL &&
-	    strcmp(client->request->uri.path, "/shutdown") != 0) {
+	if (strcmp(client->request->uri.path, "/health") == 0) {
+		client->request->response_code = 200;
+		slayer_http_handle_response(server, client, "application/json",
+		                            "{\"status\":\"ok\"}", -1);
+		return APR_SUCCESS;
+	}
+	/* /shutdown still performs its local-IP check below; when bearer auth is
+	   configured, it must pass both checks. */
+	if (server->auth_token != NULL) {
 		const char *auth_header =
 			slayer_http_header_get(client->request->parse, "Authorization");
 		if (auth_header == NULL || strncmp(auth_header, "Bearer ", 7) != 0 ||
-		    strcmp(auth_header + 7, server->auth_token) != 0) {
+		    !slayer_auth_token_matches(auth_header + 7,
+		                               server->auth_token)) {
 			client->request->response_code = 401;
 			slayer_http_handle_response(server, client, "text/plain",
 			                            "Unauthorized", -1);
 			return APR_SUCCESS;
 		}
+	}
+	if (strcmp(client->request->uri.path, "/metrics") == 0) {
+		slayer_server_stats_t stats;
+		char *message;
+		slayer_server_stats_get(server->stats, &stats);
+		message = apr_psprintf(
+			client->request->mpool,
+			"# HELP dbslayer_requests_total Total requests processed\n"
+			"# TYPE dbslayer_requests_total counter\n"
+			"dbslayer_requests_total %d\n"
+			"# HELP dbslayer_active_connections Current active connections\n"
+			"# TYPE dbslayer_active_connections gauge\n"
+			"dbslayer_active_connections %u\n"
+			"# HELP dbslayer_db_errors_total Total database errors\n"
+			"# TYPE dbslayer_db_errors_total counter\n"
+			"dbslayer_db_errors_total %u\n",
+			stats.total_requests,
+			(unsigned int)apr_atomic_read32(&server->active_connections),
+			(unsigned int)apr_atomic_read32(&server->db_errors_total));
+		client->request->response_code = 200;
+		slayer_http_handle_response(
+			server, client, "text/plain; version=0.0.4; charset=utf-8",
+			message, -1);
+		return APR_SUCCESS;
 	}
 	int nothandled = 1;
 	for(i = 0; nothandled && i < server->service_map_size ; i++) { 
@@ -551,7 +685,7 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 			char *extra_arg = i+1 < argc && argv[i+1][0] != '-' ? argv[i+1] : NULL;
 		switch (argv[i][1]) {
 		  case '?':
-			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
+			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -j JSON-logging -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 			  for(i = 0; i < server->service_map_size; i++) { 	
 				  fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 			  }
@@ -570,6 +704,9 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 			  break;
 		  case 'l':
 			  server->logfile = extra_arg ;
+			  break;
+		  case 'j':
+			  server->json_logs = 1;
 			  break;
 		  case 'p':
 			  server->port = atoi(extra_arg);
@@ -612,7 +749,7 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 		exit(-1);
 	}
 	if ( server->thread_count == 0 || server->port == 0 ) {
-		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
+		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -j JSON-logging -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 		for(i = 0; i < server->service_map_size; i++) { 	
 			fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 		}
@@ -643,6 +780,9 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	status = apr_initialize();
 	status = apr_pool_create(&(server.mpool),NULL);
 	slayer_server_parse_args(argc,argv,&server);
+	server.connection_counts = apr_hash_make(server.mpool);
+	apr_thread_mutex_create(&server.connection_counts_mutex,
+	                        APR_THREAD_MUTEX_DEFAULT, server.mpool);
 
 	server.thread_count++;
 
@@ -686,6 +826,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		fprintf(stderr,"dbslayer: refusing to start without the requested access log\n");
 		exit(-1);
 	}
+	server.lmanager->json_logs = server.json_logs;
 	if (slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL) != APR_SUCCESS) {
 		fprintf(stderr,"dbslayer: refusing to start without the requested error log\n");
 		exit(-1);
@@ -701,7 +842,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	threads = apr_array_make(server.mpool,server.thread_count,sizeof(apr_thread_t*));
 	apr_threadattr_create(&thread_attr,server.mpool);
 	apr_threadattr_detach_set(thread_attr,0); // don't detach
-	apr_threadattr_stacksize_set(thread_attr,4096*10);
+	apr_threadattr_stacksize_set(thread_attr,4096*32);
 
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {

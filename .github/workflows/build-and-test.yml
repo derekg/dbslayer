@@ -34,3 +34,33 @@ jobs:
 
       - name: Run bugfix tests
         run: python3 test/test_bugfixes.py
+
+  build-and-test-sanitized:
+    runs-on: ubuntu-latest
+    env:
+      CFLAGS: -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
+      LDFLAGS: -fsanitize=address,undefined
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libapr1-dev libaprutil1-dev libmysqlclient-dev \
+            libssl-dev gcc make autoconf automake
+
+      - name: Configure with sanitizers
+        run: |
+          ./configure \
+            --with-apr-1-config=$(which apr-1-config) \
+            --with-apu-1-config=$(which apu-1-config) \
+            --with-mysql-config=$(which mysql_config) \
+            --with-openssl
+
+      - name: Build with sanitizers
+        run: make -j$(nproc)
+
+      - name: Run tests under sanitizers
+        run: python3 test/test_bugfixes.py

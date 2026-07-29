@@ -23,6 +23,7 @@ typedef struct _slayer_server_log_manager_t {
 	query_entry_t *entries;
 	int offset;
 	int nentries;
+	int json_logs;
 	apr_thread_mutex_t *list_mutex;
 } slayer_server_log_manager_t;
 

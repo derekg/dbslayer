@@ -15,13 +15,15 @@ json_value* decode_json_object(json_string *injson);
 json_value* decode_json_string(json_string *injson);
 json_value * decode_json_value(json_string *injson); 
 
-/** dump more than encode **/
+#ifdef DBSLAYER_DEBUG
+/** debug-only JSON dump helpers; production serialization lives in serializejson.c **/
 void encode_json_object(json_value *json);
 void encode_json_array(json_value *json);
 void encode_json_boolean(json_value *json);
 void encode_json_string(json_value *json);
 void encode_json_null(json_value *json);
 void encode_json_number(json_value *json);
+#endif
 
 typedef struct _json_link_t {
 	json_value *value;
@@ -347,7 +349,7 @@ json_value * decode_json_value(json_string *injson) {
 						case '9':  
 						case '0':  outjson = decode_json_number(injson); break;
 						default:
-								printf("XError %s\n",injson->jstring); return NULL;
+								return NULL;
 		}
 	}//end of if
 	return outjson;
@@ -368,9 +370,7 @@ json_value * decode_json(const char *injson,int injson_size, apr_pool_t *mpool) 
 	if(jstring.offset != jstring.end ) { out = NULL; }
 	return out;
 }
-
-
-
+#ifdef DBSLAYER_DEBUG
 void encode_json_array(json_value *json) { 
 	printf("[");
 	int i;
@@ -463,4 +463,5 @@ int main(int argc, char **argv) {
 	apr_pool_terminate();
 	return 0;
 }
+#endif
 #endif
