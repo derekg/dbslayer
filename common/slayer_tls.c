@@ -44,6 +44,7 @@ slayer_tls_ctx *slayer_tls_init(const char *cert_path, const char *key_path) {
 		free(ctx);
 		return NULL;
 	}
+	SSL_CTX_set_min_proto_version(ctx->ctx, TLS1_2_VERSION);
 	SSL_CTX_set_options(ctx->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 	if (SSL_CTX_use_certificate_chain_file(ctx->ctx, cert_path) != 1 ||
 	    SSL_CTX_use_PrivateKey_file(ctx->ctx, key_path, SSL_FILETYPE_PEM) != 1 ||
