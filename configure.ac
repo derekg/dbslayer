@@ -109,6 +109,58 @@ AC_PROG_INSTALL
 AC_PROG_RANLIB
 # AC_PROG_LIBTOOL
 
+dnl Optional OpenSSL support for the TLS listener.
+AC_ARG_WITH([openssl],
+  [AS_HELP_STRING([--with-openssl@<:@=PATH@:>@],
+                  [Enable TLS support via OpenSSL (optionally under PATH)])],
+  [],
+  [with_openssl=auto])
+
+OPENSSL_CFLAGS=
+OPENSSL_LIBS=
+have_openssl=no
+
+if test "x$with_openssl" != "xno"; then
+  if test "x$with_openssl" != "xyes" &&
+     test "x$with_openssl" != "xauto"; then
+    OPENSSL_CFLAGS="-I$with_openssl/include"
+    OPENSSL_LIBS="-L$with_openssl/lib -lssl -lcrypto"
+  else
+    AC_PATH_PROG([PKG_CONFIG], [pkg-config])
+    if test -n "$PKG_CONFIG" && $PKG_CONFIG --exists openssl; then
+      OPENSSL_CFLAGS=`$PKG_CONFIG --cflags openssl`
+      OPENSSL_LIBS=`$PKG_CONFIG --libs openssl`
+    else
+      OPENSSL_LIBS="-lssl -lcrypto"
+    fi
+  fi
+
+  saved_CPPFLAGS="$CPPFLAGS"
+  saved_LIBS="$LIBS"
+  CPPFLAGS="$CPPFLAGS $OPENSSL_CFLAGS"
+  LIBS="$OPENSSL_LIBS $LIBS"
+  AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM([[#include <openssl/ssl.h>]],
+                     [[SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+                       SSL_CTX_free(ctx);]])],
+    [have_openssl=yes],
+    [have_openssl=no])
+  CPPFLAGS="$saved_CPPFLAGS"
+  LIBS="$saved_LIBS"
+fi
+
+if test "x$have_openssl" = "xyes"; then
+  AC_DEFINE([HAVE_OPENSSL], [1],
+            [Define to 1 when OpenSSL TLS support is available.])
+  AC_MSG_NOTICE([OpenSSL TLS support enabled])
+else
+  OPENSSL_CFLAGS=
+  OPENSSL_LIBS=
+  AC_MSG_NOTICE([OpenSSL not found; TLS support disabled])
+fi
+AC_SUBST([OPENSSL_CFLAGS])
+AC_SUBST([OPENSSL_LIBS])
+
 # Checks for libraries.
 # FIXME: Replace `main' with a function in `-ldbaccess':
 #AC_CHECK_LIB([dbaccess], [main])
