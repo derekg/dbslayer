@@ -28,7 +28,13 @@ void * db_global_init(apr_pool_t *pmpool, int argc, char **argv) {
 				case 's': config->server = apr_pstrdup(pmpool,argv[i+1]); break;
 				case 'c': config->configure = apr_pstrdup(pmpool,argv[i+1]); break;
 				case 'u': config->username = apr_pstrdup(pmpool,argv[i+1]); break;
-				case 'x': config->password = apr_pstrdup(pmpool,argv[i+1]); break;
+				case 'x':
+					config->password = apr_pstrdup(pmpool,argv[i+1]);
+					//overwrite the argv slot in place so the password disappears from
+					///proc/<pid>/cmdline, from ps, and from the /stats/args response that
+					//slayer_server_run builds a few lines after this function returns
+					memset(argv[i+1],'x',strlen(argv[i+1]));
+					break;
 				case 'm': config->multiserver= apr_pstrdup(pmpool,argv[i+1]); break;
 			}			
 		}

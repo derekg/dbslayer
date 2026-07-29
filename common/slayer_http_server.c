@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include "slayer_http_server.h"
 #include "slayer_http_fileserver.h"
 
@@ -521,6 +523,15 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		server.elogfile = apr_pstrcat(server.mpool,reldir,"/",server.elogfile,NULL);
 	}
 
+	if (server.debug == NULL) {
+		//the credentials live in the heap for the process lifetime (the reconnect path in
+		//db_handle_reattach needs them), so a core file is a credential disclosure. keep
+		//cores for -d debug runs only.
+		struct rlimit rl;
+		rl.rlim_cur = rl.rlim_max = 0;
+		setrlimit(RLIMIT_CORE,&rl);
+	}
+
 	chdir("/tmp"); // so I can dump core someplace that I am likely to have write access to
 
 	//call the global initializers
@@ -553,10 +564,13 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {
+		//never echo a credential back over /stats/args, whatever the global initialisers did
+		const char *arg = argv[i];
+		if (i > 0 && strcmp(argv[i-1],"-x") == 0) arg = "[redacted]";
 		if (server.startup_args == NULL) {
-			server.startup_args = apr_pstrcat(server.mpool,argv[i],NULL);
+			server.startup_args = apr_pstrcat(server.mpool,arg,NULL);
 		} else {
-			server.startup_args = apr_pstrcat(server.mpool,server.startup_args," ",argv[i],NULL);
+			server.startup_args = apr_pstrcat(server.mpool,server.startup_args," ",arg,NULL);
 		}
 	}
 
