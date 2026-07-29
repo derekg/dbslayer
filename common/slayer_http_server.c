@@ -482,6 +482,17 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		if(server.service_map[i]->service->service_global_init_func) server.service_map[i]->global_config = server.service_map[i]->service->service_global_init_func(server.mpool,argc,argv);
 	}
 
+	//
+	//100 was intended to be a command line argument but number of commandline args is growing out of control
+	if (slayer_server_log_open(&(server.lmanager),server.logfile,100,NULL) != APR_SUCCESS) {
+		fprintf(stderr,"dbslayer: refusing to start without the requested access log\n");
+		exit(-1);
+	}
+	if (slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL) != APR_SUCCESS) {
+		fprintf(stderr,"dbslayer: refusing to start without the requested error log\n");
+		exit(-1);
+	}
+
 	if (server.debug == NULL) {
 		apr_proc_detach(APR_PROC_DETACH_DAEMONIZE);
 	}
@@ -494,10 +505,6 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	apr_threadattr_detach_set(thread_attr,0); // don't detach
 	apr_threadattr_stacksize_set(thread_attr,4096*10);
 
-	//
-	//100 was intended to be a command line argument but number of commandline args is growing out of control
-	slayer_server_log_open(&(server.lmanager),server.logfile,100,NULL);
-	slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL);
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {
 		if (server.startup_args == NULL) {

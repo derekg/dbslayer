@@ -13,7 +13,15 @@ int slayer_server_log_open(slayer_server_log_manager_t **_manager,const char *fi
 	//only create if there is a non-null filename passed in
 	if (filename) {
 		status = apr_thread_mutex_create(&manager->file_mutex,APR_THREAD_MUTEX_DEFAULT,manager->mpool);
+		if (status != APR_SUCCESS) return status;
 		status = apr_file_open(&manager->fhandle,filename,APR_CREATE | APR_WRITE | APR_APPEND | APR_BUFFERED,APR_OS_DEFAULT,manager->mpool);
+		if (status != APR_SUCCESS) {
+			char ebuf[256];
+			manager->fhandle = NULL; //apr_file_open leaves it untouched on failure - be explicit
+			fprintf(stderr,"dbslayer: could not open log file '%s' - %s\n",
+			        filename,apr_strerror(status,ebuf,sizeof(ebuf)));
+			return status;
+		}
 	}
 	status = apr_thread_mutex_create(&manager->list_mutex,APR_THREAD_MUTEX_DEFAULT,manager->mpool);
 
