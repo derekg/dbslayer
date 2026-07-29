@@ -15,6 +15,7 @@ static char * slayer_http_response_code_lookup(int code) {
 	char *description = "500 Internal Server Error";
 	switch(code) { 
 		case 200: description = "200 OK"; break;
+		case 401: description = "401 Unauthorized"; break;
 		case 403: description = "403 Forbidden"; break;
 		case 404: description = "404 Not Found"; break;
 		default:
@@ -366,6 +367,19 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 		apr_socket_close(client->conn);
 		apr_pool_destroy(client->mpool);
 		return APR_SUCCESS;
+	}
+	/* bearer token check — skip for /shutdown (has its own local-IP auth) */
+	if (server->auth_token != NULL &&
+	    strcmp(client->request->uri.path, "/shutdown") != 0) {
+		const char *auth_header =
+			slayer_http_header_get(client->request->parse, "Authorization");
+		if (auth_header == NULL || strncmp(auth_header, "Bearer ", 7) != 0 ||
+		    strcmp(auth_header + 7, server->auth_token) != 0) {
+			client->request->response_code = 401;
+			slayer_http_handle_response(server, client, "text/plain",
+			                            "Unauthorized", -1);
+			return APR_SUCCESS;
+		}
 	}
 	int nothandled = 1;
 	for(i = 0; nothandled && i < server->service_map_size ; i++) { 

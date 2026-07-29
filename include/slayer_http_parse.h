@@ -5,6 +5,12 @@
 
 #define INVALID_HTTP_REQUEST -1
 
+typedef struct _slayer_http_header_t {
+	char *name;
+	char *value;
+	struct _slayer_http_header_t *next;
+} slayer_http_header_t;
+
 enum PARSE_REQUEST_STATE {
 	PARSE_REQUEST_START = 0,
 	PARSE_WS_BEFORE_URI,
@@ -37,6 +43,7 @@ enum PARSE_HEADER_STATE {
 };
 
 typedef struct _slayer_http_request_parse_t {
+	apr_pool_t *mpool;
 	enum PARSE_REQUEST_STATE request_state;
 	char method_string[6];
 	int method_size;
@@ -50,10 +57,18 @@ typedef struct _slayer_http_request_parse_t {
 	char *buffer;
 	apr_size_t buffer_size;
 	char *buffer_marker;
+	slayer_http_header_t *headers;
+	slayer_http_header_t *headers_tail;
+	char *header_name;
+	apr_size_t header_name_size;
+	char *header_value;
+	apr_size_t header_value_size;
 } slayer_http_request_parse_t;
 
 int slayer_http_request_parse_init(apr_pool_t *mpool, slayer_http_request_parse_t **parse, int uri_size);
 int slayer_http_request_parse_destroy(slayer_http_request_parse_t *parse);
 int slayer_http_request_line_parse(slayer_http_request_parse_t *parse);
 int slayer_http_request_header_parse(slayer_http_request_parse_t *parse);
+/* look up a header value by name (case-insensitive). Returns NULL if not found. */
+const char *slayer_http_header_get(slayer_http_request_parse_t *parse, const char *name);
 #endif /*_SLAYER_HTTP_PARSE_H_*/
