@@ -116,7 +116,7 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 	int connections_count = 0;
 	slayer_http_connection_t *connections[500];
 
-	sigset(SIGPIPE,SIG_IGN);
+	signal(SIGPIPE,SIG_IGN);
 	apr_pool_create(&listener_pool,NULL);
 	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,listener_pool);
 	status = apr_socket_opt_set(conn,APR_SO_REUSEADDR,1);
@@ -193,7 +193,13 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 								continue;
 							}
 						}
-						status = apr_socket_opt_set(connection->conn,APR_SO_NONBLOCK,1);
+						/* OpenSSL may need to consume additional TLS records after
+						   poll reports readability. Keep TLS sockets blocking with
+						   the configured timeout so SSL_read can finish the record. */
+						if (tls_ctx == NULL) {
+							status = apr_socket_opt_set(connection->conn,
+							                            APR_SO_NONBLOCK,1);
+						}
 						memset(&connection->pollfd,0,sizeof(apr_pollfd_t));
 
 						connection->pollfd.client_data = connection;
