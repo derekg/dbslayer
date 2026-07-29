@@ -26,11 +26,12 @@ typedef struct {
 	int depth;
 } json_string; 
 
-typedef enum { 
+typedef enum {
 	JSON_OBJECT,
 	JSON_ARRAY,
 	JSON_STRING,
 	JSON_LONG,
+	JSON_LONGLONG,
 	JSON_DOUBLE,
 	JSON_BOOLEAN,
 	JSON_NULL,
@@ -42,6 +43,7 @@ typedef struct {
 		apr_array_header_t *array;
 		double dnumber;
 		long lnumber;
+		long long llnumber;
 		char *string;
 		char boolean;
 	} value;
@@ -55,6 +57,7 @@ void encode_json(json_value *json);
 /** HELPER FUNCTION **/ 
 json_value* json_null_create(apr_pool_t *mpool);
 json_value* json_long_create(apr_pool_t *mpool,long number);
+json_value* json_longlong_create(apr_pool_t *mpool,long long number);
 json_value* json_double_create(apr_pool_t *mpool,double number);
 json_value* json_string_create(apr_pool_t *mpool,const char *string);
 json_value* json_boolean_create(apr_pool_t *mpool,char b);

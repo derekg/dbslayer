@@ -77,12 +77,14 @@ apr_status_t  json_string_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mp
 	*op++= '"';
 	return apr_brigade_write(bbrigade,NULL,NULL,out,op-out);
 }
-apr_status_t json_number_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) { 
+apr_status_t json_number_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) {
 	if(json->type == JSON_LONG) {
 		return apr_brigade_printf(bbrigade,NULL,NULL,"%ld",json->value.lnumber);
-	} else {  
+	} else if(json->type == JSON_LONGLONG) {
+		return apr_brigade_printf(bbrigade,NULL,NULL,"%lld",json->value.llnumber);
+	} else {
 		char *buf = apr_palloc(mpool,sizeof(char)*512);
-		snprintf(buf,512,"%.16g",json->value.dnumber);	
+		snprintf(buf,512,"%.16g",json->value.dnumber);
 		//apr %g doesn't prepend leading 0 for values less than 1 - violates json parsers
 		return apr_brigade_printf(bbrigade,NULL,NULL,buf);
 	}
@@ -97,7 +99,8 @@ apr_status_t json_null_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool
 apr_status_t json_serialize_internal(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,  json_value *json) { 
 	switch(json->type){
 		case JSON_STRING: return json_string_serialize(bbrigade,mpool,json);
-		case JSON_LONG: 
+		case JSON_LONG:
+		case JSON_LONGLONG:
 		case JSON_DOUBLE: return json_number_serialize(bbrigade,mpool,json);
 		case JSON_BOOLEAN: return json_boolean_serialize(bbrigade,mpool,json); 
 		case JSON_NULL: return json_null_serialize(bbrigade,mpool,json); 

@@ -1,5 +1,4 @@
 #include "dbaccess.h"
-#include <limits.h>
 /* $Id: dbaccess.c,v 1.14 2008/03/06 01:50:58 derek Exp $ */
 
 /** all three error paths in dbexecute report the same shape - and json_skip_put appends
@@ -238,20 +237,11 @@ json_value * dbresult2json(MYSQL_RES * myresult,apr_pool_t *mpool) {
 															:json_null_create(mpool));
 						break;
 					case MYSQL_TYPE_LONGLONG:
-						//BIGINT is 64 bit - atof() silently loses precision above 2^53
+						//BIGINT is 64-bit — use native long long to preserve full precision
 						if(myrow[i] == NULL) {
 							json_array_append(orow,json_null_create(mpool));
-						} else if(fields[i].flags & UNSIGNED_FLAG) {
-							unsigned long long uv = strtoull(myrow[i],NULL,10);
-							//a value above LONG_MAX cannot be represented by json_long_create's
-							//signed long - emit it as a string rather than as a wrong negative
-							if(uv > (unsigned long long)LONG_MAX) {
-								json_array_append(orow,json_string_create(mpool,myrow[i]));
-							} else {
-								json_array_append(orow,json_long_create(mpool,(long)uv));
-							}
 						} else {
-							json_array_append(orow,json_long_create(mpool,(long)strtoll(myrow[i],NULL,10)));
+							json_array_append(orow,json_longlong_create(mpool,(long long)strtoll(myrow[i],NULL,10)));
 						}
 						break;
 					case MYSQL_TYPE_DECIMAL:

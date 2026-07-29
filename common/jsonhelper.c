@@ -14,6 +14,12 @@ json_value* json_long_create(apr_pool_t *mpool,long number) {
 	out->value.lnumber = number;
 	return out;
 }
+json_value* json_longlong_create(apr_pool_t *mpool,long long number) {
+	json_value *out = apr_palloc(mpool,sizeof(json_value));
+	out->type = JSON_LONGLONG;
+	out->value.llnumber = number;
+	return out;
+}
 json_value* json_double_create(apr_pool_t *mpool,double number){
 	json_value *out = apr_palloc(mpool,sizeof(json_value));
 	out->type = JSON_DOUBLE;
