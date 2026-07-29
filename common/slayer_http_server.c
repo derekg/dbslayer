@@ -115,8 +115,11 @@ static int handle_incoming_connections(slayer_http_server_t *server, int port,
 	int events;
 	int connections_count = 0;
 	slayer_http_connection_t *connections[500];
+	struct sigaction sa;
 
-	signal(SIGPIPE,SIG_IGN);
+	memset(&sa,0,sizeof(sa));
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE,&sa,NULL);
 	apr_pool_create(&listener_pool,NULL);
 	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,listener_pool);
 	status = apr_socket_opt_set(conn,APR_SO_REUSEADDR,1);
