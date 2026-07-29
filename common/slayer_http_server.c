@@ -5,9 +5,15 @@
 #include <sys/resource.h>
 #include "slayer_http_server.h"
 #include "slayer_http_fileserver.h"
+#include "slayer_tls.h"
 
 
 
+typedef struct _slayer_listener_config_t {
+	slayer_http_server_t *server;
+	int port;
+	slayer_tls_ctx *tls_ctx;
+} slayer_listener_config_t;
 
 static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, slayer_http_connection_t *connection, void **tl_config);
 
@@ -75,13 +81,15 @@ static int request_parse(apr_socket_t *conn, slayer_http_request_parse_t *http_r
 }
 
 
-int handle_incoming_connections(slayer_http_server_t *server) {
+static int handle_incoming_connections(slayer_http_server_t *server, int port,
+                                       slayer_tls_ctx *tls_ctx) {
 
 	apr_socket_t *conn;
 	apr_sockaddr_t *addr;
 	apr_pollset_t *pollset;
 	apr_pollfd_t pfd_listen;
 	apr_status_t status;
+	apr_pool_t *listener_pool;
 
 	const apr_pollfd_t *ret_pfd;
 	int events;
@@ -89,19 +97,22 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 	slayer_http_connection_t *connections[500];
 
 	sigset(SIGPIPE,SIG_IGN);
-	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,server->mpool);
+	apr_pool_create(&listener_pool,NULL);
+	status = apr_socket_create(&conn,APR_INET,SOCK_STREAM,APR_PROTO_TCP,listener_pool);
 	status = apr_socket_opt_set(conn,APR_SO_REUSEADDR,1);
 	status = apr_socket_opt_set(conn,APR_SO_NONBLOCK,1);
-	status = apr_sockaddr_info_get(&addr,server->hostname ? server->hostname : APR_ANYADDR,APR_UNSPEC,server->port,APR_IPV4_ADDR_OK,server->mpool);
+	status = apr_sockaddr_info_get(&addr,server->hostname ? server->hostname : APR_ANYADDR,
+	                               APR_UNSPEC,port,APR_IPV4_ADDR_OK,listener_pool);
 	status = apr_socket_bind(conn,addr);
 	if (status != APR_SUCCESS) {
-		fprintf(stderr,"couldn't bind to %s:%d\n",server->hostname ? server->hostname: "*", server->port);
+		fprintf(stderr,"couldn't bind to %s:%d\n",
+		        server->hostname ? server->hostname: "*", port);
 		exit(-1);
 	}
 	status = apr_socket_listen(conn,128);
-	status = apr_pollset_create(&pollset,sizeof(connections)/sizeof(slayer_http_connection_t*) +1 /* +1 for listenting socket */,server->mpool,0);
+	status = apr_pollset_create(&pollset,sizeof(connections)/sizeof(slayer_http_connection_t*) +1 /* +1 for listenting socket */,listener_pool,0);
 	memset(connections,0,sizeof(connections) );
-	pfd_listen.p = server->mpool;
+	pfd_listen.p = listener_pool;
 	pfd_listen.desc_type  = APR_POLL_SOCKET;
 	pfd_listen.reqevents = APR_POLLIN;
 	pfd_listen.rtnevents = 0;
@@ -150,6 +161,17 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 							}
 							apr_pool_destroy(cmpool);
 							continue;
+						}
+						if (tls_ctx != NULL) {
+							apr_socket_timeout_set(connection->conn,
+							                       server->socket_timeout);
+							connection->tls = slayer_tls_accept(tls_ctx,
+							                                    connection->conn);
+							if (connection->tls == NULL) {
+								apr_socket_close(connection->conn);
+								apr_pool_destroy(cmpool);
+								continue;
+							}
 						}
 						status = apr_socket_opt_set(connection->conn,APR_SO_NONBLOCK,1);
 						memset(&connection->pollfd,0,sizeof(apr_pollfd_t));
@@ -237,6 +259,14 @@ int handle_incoming_connections(slayer_http_server_t *server) {
 		}
 	}
 	return 0;
+}
+
+static void *handle_tls_connections(apr_thread_t *thread, void *data) {
+	slayer_listener_config_t *listener = data;
+	(void)thread;
+	handle_incoming_connections(listener->server, listener->port,
+	                            listener->tls_ctx);
+	return NULL;
 }
 
 void* handle_running_request(apr_thread_t *mythread,void * _server) {
@@ -505,6 +535,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	apr_threadattr_t *thread_attr;
 	apr_array_header_t *threads;
 	int i ;
+	int thread_total;
 	char *reldir = NULL;
 	slayer_http_server_t server;
 
@@ -601,13 +632,35 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		apr_thread_create(&thread,thread_attr,handle_running_request,&server,server.mpool);
 		*((apr_thread_t**)(apr_array_push(threads))) = thread;
 	}
+	thread_total = server.thread_count;
+
+	if (server.tls_cert != NULL && server.tls_key != NULL) {
+		apr_thread_t *thread;
+		slayer_listener_config_t *listener;
+		slayer_tls_ctx *tls_ctx =
+			slayer_tls_init(server.tls_cert, server.tls_key);
+		if (tls_ctx == NULL) {
+			fprintf(stderr, "dbslayer: failed to initialize TLS context\n");
+			exit(-1);
+		}
+		server.tls_ctx = tls_ctx;
+		listener = apr_pcalloc(server.mpool,
+		                       sizeof(slayer_listener_config_t));
+		listener->server = &server;
+		listener->port = server.tls_port;
+		listener->tls_ctx = tls_ctx;
+		apr_thread_create(&thread,thread_attr,handle_tls_connections,listener,
+		                  server.mpool);
+		*((apr_thread_t**)(apr_array_push(threads))) = thread;
+		thread_total++;
+	}
 
 	//create a stats timer thread
 	slayer_server_stats_timer_thread(server.mpool,server.stats);
 
-	handle_incoming_connections(&server);
+	handle_incoming_connections(&server, server.port, NULL);
 
-	for (i = 0; i < server.thread_count;i++) {
+	for (i = 0; i < thread_total;i++) {
 		apr_thread_t *thread = *((apr_thread_t**)(threads->elts + (threads->elt_size * i)));
 		apr_thread_join(&status,thread);
 	}
@@ -618,6 +671,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	}
 	slayer_server_log_close(server.lmanager);
 	slayer_server_log_close(server.elmanager);
+	slayer_tls_ctx_free((slayer_tls_ctx *)server.tls_ctx);
 	apr_pool_destroy(server.mpool);
 	apr_terminate();
 	free(reldir);
