@@ -1,10 +1,31 @@
 #include "dbaccess.h"
+#include <errno.h>
+#include <limits.h>
 /* $Id: dbaccess.c,v 1.14 2008/03/06 01:50:58 derek Exp $ */
 
 static int dbprocess_result(MYSQL *db, MYSQL_RES *myresult, json_value **sql_result,
                             json_value **all_result, apr_pool_t *mpool);
 static void dbprocess_metadata(MYSQL *db, json_value *injson, json_value *out,
                                const char *dbserver_name, apr_pool_t *mpool);
+
+static unsigned int db_query_timeout_seconds(void) {
+	const char *value = getenv("DBSLAYER_QUERY_TIMEOUT");
+	char *end = NULL;
+	unsigned long timeout;
+
+	if (value == NULL || *value == '\0') return 30;
+	errno = 0;
+	timeout = strtoul(value, &end, 10);
+	if (errno != 0 || *end != '\0' || timeout == 0 || timeout > UINT_MAX) {
+		return 30;
+	}
+	return (unsigned int)timeout;
+}
+
+static void db_set_query_timeouts(MYSQL *db, unsigned int timeout_sec) {
+	mysql_options(db, MYSQL_OPT_READ_TIMEOUT, &timeout_sec);
+	mysql_options(db, MYSQL_OPT_WRITE_TIMEOUT, &timeout_sec);
+}
 
 /** all three error paths in dbexecute report the same shape - and json_skip_put appends
     rather than replaces, so adding a key twice emits a duplicate in the JSON. add once. **/
@@ -31,11 +52,15 @@ static void db_report_error(json_value *out, apr_pool_t *mpool, MYSQL *db,
 }
 
 db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) {
+	unsigned int timeout_sec = db_query_timeout_seconds();
+
 	if(handle->dblookup == NULL) {
 		int ct = handle->server_offset;
 		for(ct = handle->server_offset ; ct < handle->server_count; ct++) {
 			if(handle->db) mysql_close(handle->db);
 			handle->db = mysql_init(NULL);
+			if(handle->db == NULL) continue;
+			db_set_query_timeouts(handle->db, timeout_sec);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_FILE,handle->config);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_GROUP,handle->server[ct]);
 			if(mysql_real_connect(handle->db,NULL,handle->user,handle->pass,NULL,0,NULL,CLIENT_MULTI_STATEMENTS) != NULL){
@@ -46,6 +71,8 @@ db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) 
 		for(ct = 0; ct < handle->server_offset; ct++) {
 			if(handle->db) mysql_close(handle->db);
 			handle->db = mysql_init(NULL);
+			if(handle->db == NULL) continue;
+			db_set_query_timeouts(handle->db, timeout_sec);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_FILE,handle->config);
 			mysql_options(handle->db,MYSQL_READ_DEFAULT_GROUP,handle->server[ct]);
 			if(mysql_real_connect(handle->db,NULL,handle->user,handle->pass,NULL,0,NULL,CLIENT_MULTI_STATEMENTS) != NULL){
@@ -57,6 +84,11 @@ db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) 
 		MYSQL *db = json_skip_get(handle->dblookup,(void*) dbserver_name);
 		if(db) { mysql_close(db); }
 		db = mysql_init(NULL);
+		if(db == NULL) {
+			json_skip_replace(handle->dblookup,(void*)dbserver_name,NULL);
+			return NULL;
+		}
+		db_set_query_timeouts(db, timeout_sec);
 		mysql_options(db,MYSQL_READ_DEFAULT_FILE,handle->config);
 		mysql_options(db,MYSQL_READ_DEFAULT_GROUP,dbserver_name);
 		json_skip_replace(handle->dblookup,(void*)dbserver_name,db);
