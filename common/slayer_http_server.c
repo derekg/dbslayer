@@ -652,7 +652,7 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 			char *extra_arg = i+1 < argc && argv[i+1][0] != '-' ? argv[i+1] : NULL;
 		switch (argv[i][1]) {
 		  case '?':
-			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
+			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -j JSON-logging -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 			  for(i = 0; i < server->service_map_size; i++) { 	
 				  fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 			  }
@@ -671,6 +671,9 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 			  break;
 		  case 'l':
 			  server->logfile = extra_arg ;
+			  break;
+		  case 'j':
+			  server->json_logs = 1;
 			  break;
 		  case 'p':
 			  server->port = atoi(extra_arg);
@@ -713,7 +716,7 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 		exit(-1);
 	}
 	if ( server->thread_count == 0 || server->port == 0 ) {
-		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
+		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -j JSON-logging -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 		for(i = 0; i < server->service_map_size; i++) { 	
 			fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 		}
@@ -790,6 +793,7 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		fprintf(stderr,"dbslayer: refusing to start without the requested access log\n");
 		exit(-1);
 	}
+	server.lmanager->json_logs = server.json_logs;
 	if (slayer_server_log_open(&(server.elmanager),server.elogfile,100,NULL) != APR_SUCCESS) {
 		fprintf(stderr,"dbslayer: refusing to start without the requested error log\n");
 		exit(-1);

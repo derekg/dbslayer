@@ -43,6 +43,7 @@ typedef struct _slayer_http_server_t {
 	char *basedir;
 	char *logfile;
 	char *elogfile;
+	int json_logs;
 	int thread_count;
 	int port;
 	int socket_timeout;
