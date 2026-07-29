@@ -44,6 +44,13 @@ typedef struct _slayer_http_server_t {
 	int socket_timeout;
 	int nslice;
 	int tslice;
+	/* bearer token auth — NULL means no auth enforced */
+	char *auth_token;
+	/* TLS — NULL means plaintext only */
+	char *tls_cert;
+	char *tls_key;
+	int tls_port;
+	void *tls_ctx; /* SSL_CTX* — opaque to header */
 	_slayer_http_service_map_t **service_map;
 	int service_map_size;
 	int uri_size;
@@ -68,6 +75,7 @@ typedef struct _slayer_http_request_t {
 typedef struct _slayer_http_connection_t { 
 	apr_pool_t *mpool;
 	apr_socket_t *conn;
+	void *tls; /* SSL* — NULL for plaintext connections */
 	apr_pollfd_t pollfd;
 	slayer_http_request_t *request;
 } slayer_http_connection_t;
