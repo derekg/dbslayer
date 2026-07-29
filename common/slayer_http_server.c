@@ -501,14 +501,51 @@ static apr_status_t slayer_http_request_dispatch(slayer_http_server_t *server, s
 	return APR_SUCCESS;
 }
 
+static void slayer_server_read_auth_token_file(slayer_http_server_t *server,
+                                                const char *path) {
+	FILE *file;
+	char buffer[256];
+	char *newline;
+
+	file = fopen(path, "r");
+	if (file == NULL || fgets(buffer, sizeof(buffer), file) == NULL) {
+		if (file != NULL) fclose(file);
+		fprintf(stderr, "dbslayer: unable to read auth token file %s\n", path);
+		exit(-1);
+	}
+	fclose(file);
+	newline = strpbrk(buffer, "\r\n");
+	if (newline != NULL) *newline = '\0';
+	if (buffer[0] == '\0') {
+		fprintf(stderr, "dbslayer: auth token file %s is empty\n", path);
+		exit(-1);
+	}
+	server->auth_token = apr_pstrdup(server->mpool, buffer);
+}
+
 static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t *server) { 
 	int i;
+	for(i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--auth-token") == 0 && i + 1 < argc) {
+			server->auth_token = apr_pstrdup(server->mpool, argv[++i]);
+		} else if (strcmp(argv[i], "--auth-token-file") == 0 &&
+		           i + 1 < argc) {
+			slayer_server_read_auth_token_file(server, argv[++i]);
+		} else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
+			server->tls_cert = apr_pstrdup(server->mpool, argv[++i]);
+		} else if (strcmp(argv[i], "--tls-key") == 0 && i + 1 < argc) {
+			server->tls_key = apr_pstrdup(server->mpool, argv[++i]);
+		} else if (strcmp(argv[i], "--tls-port") == 0 && i + 1 < argc) {
+			server->tls_port = atoi(argv[++i]);
+		}
+	}
+
 	for(i = 1; i < argc; i++) { 	
 		if(argv[i][0] == '-' && strlen(argv[i]) == 2) {
 			char *extra_arg = i+1 < argc && argv[i+1][0] != '-' ? argv[i+1] : NULL;
 		switch (argv[i][1]) {
 		  case '?':
-			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [ defaults to 60 seconds] ] -v [prints version and exits]\n",basename(argv[0]));
+			  fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 			  for(i = 0; i < server->service_map_size; i++) { 	
 				  fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 			  }
@@ -543,6 +580,11 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 		  case 'i':
 			  server->tslice = (atoi(extra_arg) == 0 ? 60 : atoi(extra_arg)) ;
 			  break;
+		  case 'k':
+			  if (extra_arg != NULL) {
+				  server->auth_token = apr_pstrdup(server->mpool, extra_arg);
+			  }
+			  break;
 		  case 'v':
 			  fprintf(stdout,"%s\n",server->server_name);
 			  exit(0);
@@ -551,8 +593,20 @@ static void slayer_server_parse_args(int argc, char **argv,slayer_http_server_t 
 		  }	//end of switch
 		} //if 
 	}
+	if (server->auth_token == NULL && getenv("DBSLAYER_AUTH_TOKEN") != NULL) {
+		server->auth_token =
+			apr_pstrdup(server->mpool, getenv("DBSLAYER_AUTH_TOKEN"));
+	}
+	if (server->tls_cert != NULL && server->tls_port == 0) {
+		server->tls_port = 9443;
+	}
+	if ((server->tls_cert == NULL) != (server->tls_key == NULL)) {
+		fprintf(stderr,
+		        "dbslayer: --tls-cert and --tls-key must be specified together\n");
+		exit(-1);
+	}
 	if ( server->thread_count == 0 || server->port == 0 ) {
-		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [ defaults to 60 seconds] ] -v [prints version and exits]\n",basename(argv[0]));
+		fprintf(stdout,"Usage %s:  [-t thread-count -p port -h ip-to-bind-to -d debug -w socket-timeout -b basedir -l logfile -e error-logfile -n number-of-stats-buckets [defaults to 1 bucket per minute for 24 hours] -i interval-to-update-stats-buckets [defaults to 60 seconds] -k auth-token --auth-token token --auth-token-file path --tls-cert path --tls-key path --tls-port port] -v [prints version and exits]\n",basename(argv[0]));
 		for(i = 0; i < server->service_map_size; i++) { 	
 			fprintf(stdout,"\t %s\n",server->service_map[i]->service->help_string);
 		}
@@ -580,12 +634,12 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	server.thread_count = 1;
 	server.server_name = server_name;
 
+	status = apr_initialize();
+	status = apr_pool_create(&(server.mpool),NULL);
 	slayer_server_parse_args(argc,argv,&server);
 
 	server.thread_count++;
 
-	status = apr_initialize();
-	status = apr_pool_create(&(server.mpool),NULL);
 	reldir = getcwd(NULL,0);
 
 	if (server.config !=NULL && server.config[0] !='/') {
@@ -596,6 +650,12 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 	}
 	if (server.elogfile !=NULL && server.elogfile[0] !='/') {
 		server.elogfile = apr_pstrcat(server.mpool,reldir,"/",server.elogfile,NULL);
+	}
+	if (server.tls_cert !=NULL && server.tls_cert[0] !='/') {
+		server.tls_cert = apr_pstrcat(server.mpool,reldir,"/",server.tls_cert,NULL);
+	}
+	if (server.tls_key !=NULL && server.tls_key[0] !='/') {
+		server.tls_key = apr_pstrcat(server.mpool,reldir,"/",server.tls_key,NULL);
 	}
 
 	if (server.debug == NULL) {
@@ -642,7 +702,11 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 		/* Keep legacy -x values out of /stats/args even though -x is no longer
 		   accepted as a credential source. */
 		const char *arg = argv[i];
-		if (i > 0 && strcmp(argv[i-1],"-x") == 0) arg = "[redacted]";
+		if (i > 0 && (strcmp(argv[i-1],"-x") == 0 ||
+		              strcmp(argv[i-1],"-k") == 0 ||
+		              strcmp(argv[i-1],"--auth-token") == 0)) {
+			arg = "[redacted]";
+		}
 		if (server.startup_args == NULL) {
 			server.startup_args = apr_pstrcat(server.mpool,arg,NULL);
 		} else {
