@@ -21,26 +21,25 @@ void * db_global_init(apr_pool_t *pmpool, int argc, char **argv) {
 	int i = 0;
 	mysql_library_init(0,NULL,NULL); //setup init
 	dbslayer_config_t *config = apr_pcalloc(pmpool,sizeof(dbslayer_config_t));
-	//looking for -> -s server -c config -u username -x password
+	//looking for -> -s server -c config -m multiserver
 	for( i = 0; i < argc; i++) { 
 		if( i+1 < argc && argv[i][0] == '-' ) { 
 			switch(argv[i][1]) { 
 				case 's': config->server = apr_pstrdup(pmpool,argv[i+1]); break;
 				case 'c': config->configure = apr_pstrdup(pmpool,argv[i+1]); break;
-				case 'u': config->username = apr_pstrdup(pmpool,argv[i+1]); break;
-				case 'x':
-					config->password = apr_pstrdup(pmpool,argv[i+1]);
-					//overwrite the argv slot in place so the password disappears from
-					///proc/<pid>/cmdline, from ps, and from the /stats/args response that
-					//slayer_server_run builds a few lines after this function returns
-					memset(argv[i+1],'x',strlen(argv[i+1]));
-					break;
 				case 'm': config->multiserver= apr_pstrdup(pmpool,argv[i+1]); break;
 			}			
 		}
 	}
+
+	/* Credentials come from the environment, not the command line. When these
+	   are unset, mysql_options(MYSQL_READ_DEFAULT_FILE) supplies credentials
+	   from the existing MySQL configuration file mechanism. */
+	config->username = getenv("DBSLAYER_DB_USER");
+	config->password = getenv("DBSLAYER_DB_PASS");
+
 	if((config->server == NULL && config->multiserver == NULL) || config->configure == NULL ) { 
-		fprintf(stderr,"Failed to configure dbslayer - [-s server[:server] or -m server[:server] ] and -c configure are required arguments\n");
+		fprintf(stderr,"Failed to configure dbslayer - [-s server[:server] or -m server[:server] ] and -c configure are required arguments; credentials come from the MySQL config file or DBSLAYER_DB_USER/DBSLAYER_DB_PASS\n");
 		exit(0);
 	}
 
@@ -122,7 +121,7 @@ int main(int argc, char **argv) {
 	char *urls[] = { "/db","/dbform",NULL};
 
 	slayer_http_service_t handler;
-	handler.help_string =  "-s server[:server] -c config [-u username -x password]";
+	handler.help_string =  "-s server[:server] -c config (credentials: MySQL config or DBSLAYER_DB_USER/DBSLAYER_DB_PASS)";
 	handler.service_global_init_func = db_global_init;
 	handler.service_global_destroy_func = db_global_destroy;
 	handler.service_thread_init_func = db_thread_init;

@@ -578,7 +578,8 @@ int slayer_server_run(int service_map_size, slayer_http_service_map_t **service_
 
 	server.stats = slayer_server_stat_init(server.mpool,server.nslice,server.tslice);
 	for (i = 0; i < argc; i++) {
-		//never echo a credential back over /stats/args, whatever the global initialisers did
+		/* Keep legacy -x values out of /stats/args even though -x is no longer
+		   accepted as a credential source. */
 		const char *arg = argv[i];
 		if (i > 0 && strcmp(argv[i-1],"-x") == 0) arg = "[redacted]";
 		if (server.startup_args == NULL) {
