@@ -2,6 +2,30 @@
 #include <limits.h>
 /* $Id: dbaccess.c,v 1.14 2008/03/06 01:50:58 derek Exp $ */
 
+/** all three error paths in dbexecute report the same shape - and json_skip_put appends
+    rather than replaces, so adding a key twice emits a duplicate in the JSON. add once. **/
+static void db_report_error(json_value *out, apr_pool_t *mpool, MYSQL *db,
+                            const char *dbserver_name, json_value *injson) {
+	json_value *rb = NULL;
+	if(json_skip_get(out->value.object,"MYSQL_ERROR") != NULL) return;
+
+	json_object_add(out,"SUCCESS",json_boolean_create(mpool,0));
+	json_object_add(out,"MYSQL_ERROR",json_string_create(mpool,mysql_error(db)));
+	json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,mysql_errno(db)));
+	if(json_skip_get(out->value.object,"SERVER") == NULL) {
+		json_object_add(out,"SERVER",json_string_create(mpool,dbserver_name));
+	}
+
+	/** issue a rollback if caller asked for it **/
+	if ((injson->type == JSON_OBJECT)
+	      && ((rb = (json_value*)json_skip_get(injson->value.object,"ROLLBACK_ON_ERROR")) != NULL)
+	      && (rb->type == JSON_BOOLEAN)
+	      && rb->value.boolean) {
+		json_object_add(out,"ROLLBACK_ON_ERROR",json_boolean_create(mpool,1));
+		json_object_add(out,"ROLLBACK_ON_ERROR_SUCCESS",json_boolean_create(mpool,!mysql_rollback(db)));
+	}
+}
+
 db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) { 
 	if(handle->dblookup == NULL) { 
 		int ct = handle->server_offset;
@@ -314,21 +338,7 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 			if(db_handle_reattach(dbhandle,dbserver_name) == NULL || mysql_query((db = dbhandle->dblookup == NULL ? dbhandle->db : json_skip_get(dbhandle->dblookup,(void*)dbserver_name)) ,sql->value.string)){
 
 				dbserver_name = dbhandle->dblookup == NULL ? dbhandle->server[dbhandle->server_offset] : dbserver_name;
-				json_object_add(out,"MYSQL_ERROR",json_string_create(mpool,mysql_error(db)));
-				json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,mysql_errno(db)));
-				json_object_add(out,"SERVER" , json_string_create(mpool,dbserver_name));
-
-        /** issue a rollback if caller asked for it **/
-        if ((injson->type == JSON_OBJECT)
-              && ((sql = (json_value*)json_skip_get(injson->value.object, "ROLLBACK_ON_ERROR" )) != NULL)
-              && (sql->type == JSON_BOOLEAN)
-              && sql->value.boolean) {
-          
-          json_object_add(out, "ROLLBACK_ON_ERROR", json_boolean_create(mpool, 1));
-          json_object_add(out, "ROLLBACK_ON_ERROR_SUCCESS", json_boolean_create(mpool, !mysql_rollback(db)));
- 
-	      }
-          
+				db_report_error(out,mpool,db,dbserver_name,injson);
 				return out;
 			}
 		}
@@ -340,22 +350,8 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 			if(myresult == NULL  ) {  
 				/** ERROR OCCURED ***/
 				if(mysql_errno(db)) {
-					json_object_add(out,"SUCCESS",json_boolean_create(mpool,0));
-					json_object_add(out,"MYSQL_ERROR",json_string_create(mpool,mysql_error(db)));
-					json_object_add(out,"MYSQL_ERRNO",json_long_create(mpool,mysql_errno(db)));
-					json_object_add(out,"SERVER" , json_string_create(mpool,dbserver_name));
-
-          /** issue a rollback if caller asked for it **/
-          if ((injson->type == JSON_OBJECT)
-                && ((sql = (json_value*)json_skip_get(injson->value.object, "ROLLBACK_ON_ERROR")) != NULL)
-                && (sql->type == JSON_BOOLEAN)
-                && sql->value.boolean) {
-
-            json_object_add(out, "ROLLBACK_ON_ERROR", json_boolean_create(mpool, 1));
-            json_object_add(out, "ROLLBACK_ON_ERROR_SUCCESS", json_boolean_create(mpool, !mysql_rollback(db)));
-
-  	      }
-
+					db_report_error(out,mpool,db,dbserver_name,injson);
+					break;
 				} else {
 					/** SUCCESS NO RESULT RETURNED ie UPDATE | DELETE | INSERT ***/
 					;
@@ -394,13 +390,21 @@ json_value * dbexecute(db_handle_t *dbhandle, json_value *injson, apr_pool_t *mp
 				}
 				mysql_free_result(myresult);
 			}
-			if ((status = mysql_next_result(db)) > 0) printf("Could not execute statement\n");
+			status = mysql_next_result(db);
+			if (status > 0) {
+				/** a statement inside a CLIENT_MULTI_STATEMENTS batch failed. stdout is
+				    /dev/null after apr_proc_detach - the client has to be told. **/
+				db_report_error(out,mpool,db,dbserver_name,injson);
+				break;
+			}
 		}while(status ==0);
 
 		if(sql_result && !all_result) { 
 			json_object_add(out,"RESULT",sql_result);
 		}
-		json_object_add(out,"SERVER" , json_string_create(mpool,dbserver_name));
+		if(json_skip_get(out->value.object,"SERVER") == NULL) {
+			json_object_add(out,"SERVER" , json_string_create(mpool,dbserver_name));
+		}
 	} 
 	if(injson->type == JSON_OBJECT && (sql = (json_value*)json_skip_get(injson->value.object,"STAT")) !=NULL && sql->type == JSON_BOOLEAN && sql->value.boolean) { 
 		json_object_add(out,"STAT",json_string_create(mpool,mysql_stat(db)));
