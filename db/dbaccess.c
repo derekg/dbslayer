@@ -1,4 +1,5 @@
 #include "dbaccess.h"
+#include <limits.h>
 /* $Id: dbaccess.c,v 1.14 2008/03/06 01:50:58 derek Exp $ */
 
 db_handle_t * db_handle_reattach(db_handle_t *handle,const char *dbserver_name) { 
@@ -212,11 +213,27 @@ json_value * dbresult2json(MYSQL_RES * myresult,apr_pool_t *mpool) {
 															json_long_create(mpool,atol(myrow[i] )) 
 															:json_null_create(mpool));
 						break;
+					case MYSQL_TYPE_LONGLONG:
+						//BIGINT is 64 bit - atof() silently loses precision above 2^53
+						if(myrow[i] == NULL) {
+							json_array_append(orow,json_null_create(mpool));
+						} else if(fields[i].flags & UNSIGNED_FLAG) {
+							unsigned long long uv = strtoull(myrow[i],NULL,10);
+							//a value above LONG_MAX cannot be represented by json_long_create's
+							//signed long - emit it as a string rather than as a wrong negative
+							if(uv > (unsigned long long)LONG_MAX) {
+								json_array_append(orow,json_string_create(mpool,myrow[i]));
+							} else {
+								json_array_append(orow,json_long_create(mpool,(long)uv));
+							}
+						} else {
+							json_array_append(orow,json_long_create(mpool,(long)strtoll(myrow[i],NULL,10)));
+						}
+						break;
 					case MYSQL_TYPE_DECIMAL:
 					case MYSQL_TYPE_NEWDECIMAL:
 					case MYSQL_TYPE_DOUBLE:
 					case MYSQL_TYPE_FLOAT:
-					case MYSQL_TYPE_LONGLONG:
 						json_array_append(orow,myrow[i] ? 
 											json_double_create(mpool,atof(myrow[i]))
 											:json_null_create(mpool));
