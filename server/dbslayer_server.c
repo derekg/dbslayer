@@ -81,10 +81,10 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					stmt = decode_json(cquery,strlen(cquery),client->request->mpool); 
 	}
 
-	if(dbhandle && stmt) {
+	if(dbhandle && stmt && stmt->type == JSON_OBJECT) {
 					output_format =  json_skip_get(stmt->value.object,"FORMAT");
 					json_value *result = dbexecute(dbhandle,stmt,client->request->mpool);
-					json_value *errors = json_skip_get(result->value.object,"MYSQL_ERROR");	
+					json_value *errors = result->type == JSON_OBJECT ? json_skip_get(result->value.object,"MYSQL_ERROR") : NULL;
 					if(errors) { 
 									char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
 									slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,apr_pstrcat(client->request->mpool,"ERROR: ",errors->value.string,NULL));
@@ -97,7 +97,12 @@ void *dbjson_handler(slayer_http_server_t *server, void *_global_config, slayer_
 					}
 	} else  {
 					char *http_request = apr_pstrcat(client->request->mpool,client->request->parse->method == HTTP_METHOD_GET ? "GET ": "POST ",client->request->parse->uri_data,client->request->parse->version == HTTP_10 ? " HTTP/1.0" : " HTTP/1.0",NULL);
-					slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: Couldn't parse incoming JSON");
+					if(stmt && stmt->type != JSON_OBJECT) {
+						output = "{\"ERROR\" : \"the top level JSON value must be an object\"}";
+						slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: incoming JSON root was not an object");
+					} else {
+						slayer_server_log_err_message(server->elmanager,client->request->mpool,client->conn,http_request,"ERROR: Couldn't parse incoming JSON");
+					}
 	}
 
 	client->request->response_code = 200;
