@@ -47,9 +47,10 @@ apr_status_t json_object_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpo
 	return status;
 }
 apr_status_t  json_string_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mpool,json_value *json) { 
-	//length is *2 for each character if escape + 1 for terminator and +2 for leading/trailing "
-	char *out = apr_pcalloc( mpool, sizeof(char) * ((strlen(json->value.string)*2) +3));  
-	char *p = json->value.string;
+	static const char hex[] = "0123456789abcdef";
+	//worst case is a 6 byte \u00XX escape per input byte, +1 terminator, +2 for leading/trailing "
+	char *out = apr_pcalloc( mpool, sizeof(char) * ((strlen(json->value.string)*6) +3));
+	unsigned char *p = (unsigned char*)json->value.string;
 	char *op = out;
 	*op++= '"';
 	while(*p !='\0') { 
@@ -63,7 +64,13 @@ apr_status_t  json_string_serialize(apr_bucket_brigade *bbrigade, apr_pool_t *mp
 			case '/': *op++ = '\\'; *op++='/';break;
 			case '"': *op++ = '\\'; *op++='"';break;
 			default:
-					*op++= *p;
+					if(*p < 0x20) {
+						//RFC 8259: everything below 0x20 must be escaped
+						*op++='\\'; *op++='u'; *op++='0'; *op++='0';
+						*op++=hex[(*p >> 4) & 0x0f]; *op++=hex[*p & 0x0f];
+					} else {
+						*op++= *p;
+					}
 		}
 		p++;
 	}
