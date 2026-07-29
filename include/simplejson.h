@@ -13,11 +13,17 @@
 #include <apr_strings.h>
 #include "json_skip.h"
 
+/** hard cap on nesting depth - worker threads run on 40KB stacks (see
+    apr_threadattr_stacksize_set in slayer_server_run), so unbounded recursion in the
+    parser is a remote crash, not a theoretical one **/
+#define JSON_MAX_DEPTH 64
+
 typedef struct { 
 	const char *jstring;
 	const char *offset;
 	const char *end;
 	apr_pool_t *mpool;
+	int depth;
 } json_string; 
 
 typedef enum { 
